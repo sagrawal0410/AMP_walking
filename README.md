@@ -1,7 +1,7 @@
 # Legged Lab
 
-[![IsaacSim](https://img.shields.io/badge/IsaacSim-4.5.0-silver.svg)](https://docs.omniverse.nvidia.com/isaacsim/latest/overview.html)
-[![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.2.0-silver)](https://isaac-sim.github.io/IsaacLab)
+[![IsaacSim](https://img.shields.io/badge/IsaacSim-5.0.0-silver.svg)](https://docs.isaacsim.omniverse.nvidia.com/5.0.0/index.html)
+[![Isaac Lab](https://img.shields.io/badge/IsaacLab-2.2.1-silver)](https://isaac-sim.github.io/IsaacLab/v2.2.1/index.html)
 [![Python](https://img.shields.io/badge/python-3.10-blue.svg)](https://docs.python.org/3/whatsnew/3.10.html)
 [![Linux platform](https://img.shields.io/badge/platform-linux--64-orange.svg)](https://releases.ubuntu.com/20.04/)
 [![Windows platform](https://img.shields.io/badge/platform-windows--64-orange.svg)](https://www.microsoft.com/en-us/)
@@ -42,6 +42,9 @@ git clone https://github.com/zitongbai/legged_lab
 
 # Option 2: SSH
 git clone git@github.com:zitongbai/legged_lab.git
+
+cd legged_lab
+git checkout v2.2.1
 ```
 
 - Using a python interpreter that has Isaac Lab installed, install the library
@@ -90,7 +93,7 @@ python scripts/rsl_rl/train.py --task=LeggedLab-Isaac-Velocity-Rough-G1-v0 --hea
 ```
 
 ## Train
-
+<!-- 
 ### RL
 
 To train the reinforcement learning for Unitree G1, you can run the following command:
@@ -99,7 +102,7 @@ To train the reinforcement learning for Unitree G1, you can run the following co
 python scripts/rsl_rl/train.py --task=LeggedLab-Isaac-Velocity-Rough-G1-v0 --headless
 ```
 
-For more details about the arguments, run `python scripts/rsl_rl/train.py -h`.
+For more details about the arguments, run `python scripts/rsl_rl/train.py -h`. -->
 
 ### AMP
 
@@ -113,8 +116,10 @@ If you want to train it in a non-default gpu, you can pass more arguments to the
 
 ```bash
 # replace `x` with the gpu id you want to use
-python scripts/rsl_rl/train.py --task LeggedLab-Isaac-AMP-Flat-G1-v0 --headless --max_iterations 10000 --device cuda:x agent.device=cuda:x
+python scripts/rsl_rl/train.py --task LeggedLab-Isaac-AMP-Flat-G1-v0 --headless --max_iterations 50000 --device cuda:x agent.device=cuda:x
 ```
+
+For more details about the arguments, run `python scripts/rsl_rl/train.py -h`.
 
 ## Play
 
