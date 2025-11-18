@@ -315,17 +315,17 @@ class MotionDataTerm(ManagerTermBase):
         root_quat = quat_slerp(q0=root_quat_0, q1=root_quat_1, blend=blend)
 
         blend = blend.unsqueeze(-1)  # make it (n, 1) for broadcasting
-        root_pos_w = linear_interpolate(root_pos_w_0, root_pos_w_1, blend)
-        root_vel_w = linear_interpolate(root_vel_w_0, root_vel_w_1, blend)
+        root_pos_w = torch.lerp(root_pos_w_0, root_pos_w_1, blend)
+        root_vel_w = torch.lerp(root_vel_w_0, root_vel_w_1, blend)
         root_vel_b = math_utils.quat_apply_inverse(root_quat, root_vel_w)
-        root_ang_vel_w = linear_interpolate(root_ang_vel_w_0, root_ang_vel_w_1, blend)
+        root_ang_vel_w = torch.lerp(root_ang_vel_w_0, root_ang_vel_w_1, blend)
         root_ang_vel_b = math_utils.quat_apply_inverse(root_quat, root_ang_vel_w)
-        dof_pos = linear_interpolate(dof_pos_0, dof_pos_1, blend)
-        dof_vel = linear_interpolate(dof_vel_0, dof_vel_1, blend)
-        key_body_pos_w = linear_interpolate(key_body_pos_w_0, key_body_pos_w_1, blend.unsqueeze(1))
+        dof_pos = torch.lerp(dof_pos_0, dof_pos_1, blend)
+        dof_vel = torch.lerp(dof_vel_0, dof_vel_1, blend)
+        key_body_pos_w = torch.lerp(key_body_pos_w_0, key_body_pos_w_1, blend.unsqueeze(1))
         key_body_pos_b = math_utils.quat_apply_inverse(
             root_quat.unsqueeze(1).expand(-1, self.num_key_bodies, -1),
-            key_body_pos_w - root_pos_w.unsqueeze(1).expand(-1, self.num_key_bodies, -1)
+            key_body_pos_w - root_pos_w.unsqueeze(1)
         )
 
         return {
