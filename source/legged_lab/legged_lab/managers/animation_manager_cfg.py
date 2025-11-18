@@ -30,3 +30,6 @@ class AnimationTermCfg:
     
     enable_visualization: bool = True
     """Whether to enable visualization for this animation term."""
+    
+    vis_root_offset: list[float] = (0.0, 0.0, 0.0)
+    """Root position offset for visualization (x, y, z)."""

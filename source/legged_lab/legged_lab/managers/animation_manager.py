@@ -55,6 +55,9 @@ class AnimationTerm(ManagerTermBase):
 
         self.reset(torch.arange(self.num_envs))
         self._fetch_motion_data()
+        
+        if self.cfg.enable_visualization:
+            self.vis_root_offset = torch.tensor(self.cfg.vis_root_offset, device=env.device, dtype=torch.float32).unsqueeze(0)  # (1, 3)
 
     def reset(self, env_ids: Sequence[int] | None = None):
         if env_ids is None:
@@ -138,7 +141,7 @@ class AnimationTerm(ManagerTermBase):
         dof_pos = self.dof_pos_buffer[:, 0, :]        # (num_envs, num_dofs)
         
         root_states = robot_anim.data.default_root_state.clone()
-        root_states[:, :3] = root_pos_w + self._env.scene.env_origins[:, :3]
+        root_states[:, :3] = root_pos_w + self._env.scene.env_origins[:, :3] + self.vis_root_offset
         root_states[:, 3:7] = root_quat
         root_states[:, 7:10] = 0.0  # zero linear velocity
         root_states[:, 10:13] = 0.0  # zero angular velocity
