@@ -58,6 +58,8 @@ class DeepMimicSceneCfg(InteractiveSceneCfg):
     )
     # robots
     robot: ArticulationCfg = MISSING
+    # robot animation (for reference)
+    robot_anim: ArticulationCfg = None
     # sensors
     contact_forces = ContactSensorCfg(prim_path="{ENV_REGEX_NS}/Robot/.*", history_length=3, track_air_time=True)
     # lights
@@ -231,7 +233,7 @@ class TerminationsCfg:
     bad_orientation = DoneTerm(
         func=mdp.bad_orientation, 
         params={
-            "limit_angle": math.radians(45.0),
+            "limit_angle": math.radians(80.0),
         },
     )
     # motion_data_finish = DoneTerm(

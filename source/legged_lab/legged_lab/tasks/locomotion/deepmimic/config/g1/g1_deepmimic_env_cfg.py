@@ -20,7 +20,7 @@ from isaaclab.utils.assets import ISAAC_NUCLEUS_DIR, ISAACLAB_NUCLEUS_DIR
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import legged_lab.tasks.locomotion.deepmimic.mdp as mdp
-from legged_lab.tasks.locomotion.deepmimic.deepmimic_env_cfg import DeepMimicEnvCfg
+from legged_lab.tasks.locomotion.deepmimic.deepmimic_env_cfg import DeepMimicEnvCfg, DeepMimicSceneCfg
 from legged_lab import LEGGED_LAB_ROOT_DIR
 
 ##
@@ -61,7 +61,8 @@ class G1DeepMimicEnvCfg(DeepMimicEnvCfg):
         self.observations.policy.key_body_pos_b.params = {
             "asset_cfg": SceneEntityCfg(
                 name="robot", 
-                body_names=KEY_BODY_NAMES
+                body_names=KEY_BODY_NAMES, 
+                preserve_order=True
             )
         }
         self.observations.policy.ref_root_pos_error.params = {
@@ -84,6 +85,7 @@ class G1DeepMimicEnvCfg(DeepMimicEnvCfg):
         self.events.base_com.params["asset_cfg"].body_names = "torso_link"
         self.events.reset_from_ref.params = {
             "animation": ANIMATION_TERM_NAME,
+            "height_offset": 0.1
         }
         # self.events.reset_from_ref = None
         
@@ -116,7 +118,8 @@ class G1DeepMimicEnvCfg(DeepMimicEnvCfg):
             "animation": ANIMATION_TERM_NAME,
             "asset_cfg": SceneEntityCfg(
                 name="robot", 
-                body_names=KEY_BODY_NAMES
+                body_names=KEY_BODY_NAMES,
+                preserve_order=True
             )
         }
         self.rewards.ref_track_dof_pos_error_exp.weight = 0.15
@@ -136,6 +139,32 @@ class G1DeepMimicEnvCfg(DeepMimicEnvCfg):
         self.terminations.base_contact.params["sensor_cfg"].body_names = [
             "waist_yaw_link", "pelvis", ".*_shoulder_.*_link", ".*_elbow_link",
         ]
+    
+# For debug only
+@configclass
+class G1DeepMimicEnvCfg_DEBUG(G1DeepMimicEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        
+        self.scene.num_envs = 8
+        self.scene.env_spacing = 3.0
+        
+        self.scene.robot_anim = UNITREE_G1_29DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot_anim")
+        self.scene.robot_anim.spawn.rigid_props.disable_gravity = True # type: ignore
+        self.scene.robot_anim.spawn.articulation_props.enabled_self_collisions = False # type: ignore
+        self.scene.robot_anim.spawn.activate_contact_sensors = False # type: ignore
+        self.scene.robot_anim.spawn.collision_props = sim_utils.CollisionPropertiesCfg( # type: ignore
+            collision_enabled=False
+        ) 
+        
+        self.animation.animation.enable_visualization = True
+        self.animation.animation.vis_root_offset = [2.0, 0.0, 0.0]
+        self.animation.animation.random_initialize = False
+        
+        # self.terminations.bad_orientation = None
+        # self.terminations.base_height = None
+        # self.terminations.base_contact = None
+    
     
 @configclass
 class G1DeepMimicEnvCfg_PLAY(G1DeepMimicEnvCfg):
