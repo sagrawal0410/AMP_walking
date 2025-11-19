@@ -28,11 +28,14 @@ from legged_lab import LEGGED_LAB_ROOT_DIR
 ##
 from legged_lab.assets.unitree import UNITREE_G1_29DOF_CFG
 
+# The order must align with the retarget config file scripts/tools/retarget/config/g1_29dof.yaml
 KEY_BODY_NAMES = [
     "left_ankle_roll_link", 
     "right_ankle_roll_link",
     "left_wrist_yaw_link",
-    "right_wrist_yaw_link"
+    "right_wrist_yaw_link",
+    "left_shoulder_roll_link",
+    "right_shoulder_roll_link",
 ]
 ANIMATION_TERM_NAME = "animation"
 
@@ -47,12 +50,10 @@ class G1DeepMimicEnvCfg(DeepMimicEnvCfg):
         self.scene.robot = UNITREE_G1_29DOF_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
         self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            LEGGED_LAB_ROOT_DIR, "data", "MotionData", "g1_29dof", "walk"
+            LEGGED_LAB_ROOT_DIR, "data", "MotionData", "g1_29dof", "deepmimic"
         )
         self.motion_data.motion_dataset.motion_data_weights = {
-            # "G8_-__roundhouse_left_stageii": 1.0,
-            # "G9_-__roundhouse_right_stageii": 1.0,
-            "B9_-__Walk_turn_left_90_stageii": 1.0,
+            "G5_-__back_kick_stageii": 1.0,
         }
 
         # -----------------------------------------------------
