@@ -5,7 +5,7 @@ from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, R
 @configclass
 class G1DeepMimicPPORunnerCfg(RslRlOnPolicyRunnerCfg):
     num_steps_per_env = 32
-    max_iterations = 3000
+    max_iterations = 10000
     save_interval = 100
     experiment_name = "g1_deepmimic"
     policy = RslRlPpoActorCriticCfg(
