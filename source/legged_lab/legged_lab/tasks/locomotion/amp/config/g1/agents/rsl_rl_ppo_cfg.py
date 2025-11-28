@@ -11,7 +11,7 @@ from legged_lab.tasks.locomotion.amp.mdp.symmetry import g1
 class G1RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
     class_name = "AMPRunner"
     num_steps_per_env = 24
-    max_iterations = 10000
+    max_iterations = 50000
     save_interval = 200
     experiment_name = "g1_amp"
     obs_groups = {
@@ -63,13 +63,14 @@ class G1RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
             amp_discriminator=RslRlAmpCfg.AMPDiscriminatorCfg(
                 hidden_dims=[1024, 512],
                 activation="elu",
-                style_reward_scale=6.0,
-                task_style_lerp=0.5
+                style_reward_scale=5.0,
+                task_style_lerp=0.4
             ),
             loss_type="LSGAN"
         ),
         symmetry_cfg=RslRlSymmetryCfg(
-            use_data_augmentation=True, data_augmentation_func=g1.compute_symmetric_states
+            use_data_augmentation=True, data_augmentation_func=g1.compute_symmetric_states,
+            use_mirror_loss=True, mirror_loss_coeff=0.1,
         )
     )
 

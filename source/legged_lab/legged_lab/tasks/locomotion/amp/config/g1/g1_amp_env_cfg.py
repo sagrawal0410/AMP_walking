@@ -38,7 +38,7 @@ KEY_BODY_NAMES = [
     "right_shoulder_roll_link",
 ] # if changed here and symmetry is enabled, remember to update amp.mdp.symmetry.g1 as well!
 ANIMATION_TERM_NAME = "animation"
-AMP_NUM_STEPS = 10
+AMP_NUM_STEPS = 4
 
 @configclass
 class G1AmpRewards():
@@ -64,34 +64,34 @@ class G1AmpRewards():
         params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_ankle_pitch_joint", ".*_ankle_roll_joint"])},
     )
     
-    # joint_deviation_hip = RewTerm(
-    #     func=mdp.joint_deviation_l1,
-    #     weight=-0.1,
-    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint"])},
-    # )
-    # joint_deviation_arms = RewTerm(
-    #     func=mdp.joint_deviation_l1,
-    #     weight=-0.03,
-    #     params={
-    #         "asset_cfg": SceneEntityCfg(
-    #             "robot",
-    #             joint_names=[
-    #                 ".*_shoulder_.*_joint",
-    #                 ".*_elbow_joint",
-    #                 ".*_wrist_.*_joint",
-    #             ],
-    #         )
-    #     },
-    # )
-    # joint_deviation_waist = RewTerm(
-    #     func=mdp.joint_deviation_l1,
-    #     weight=-0.1,
-    #     params={"asset_cfg": SceneEntityCfg("robot", joint_names="waist_.*_joint")},
-    # )
+    joint_deviation_hip = RewTerm(
+        func=mdp.joint_deviation_l1,
+        weight=-0.1,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names=[".*_hip_yaw_joint", ".*_hip_roll_joint"])},
+    )
+    joint_deviation_arms = RewTerm(
+        func=mdp.joint_deviation_l1,
+        weight=-0.05,
+        params={
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                joint_names=[
+                    ".*_shoulder_.*_joint",
+                    ".*_elbow_joint",
+                    ".*_wrist_.*_joint",
+                ],
+            )
+        },
+    )
+    joint_deviation_waist = RewTerm(
+        func=mdp.joint_deviation_l1,
+        weight=-0.1,
+        params={"asset_cfg": SceneEntityCfg("robot", joint_names="waist_.*_joint")},
+    )
     
     feet_air_time = RewTerm(
         func=mdp.feet_air_time_positive_biped,
-        weight=0.75,
+        weight=0.5,
         params={
             "command_name": "base_velocity",
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_ankle_roll_link"),
@@ -125,18 +125,39 @@ class G1AmpEnvCfg(LocomotionAmpEnvCfg):
         # motion data
         # ------------------------------------------------------
         self.motion_data.motion_dataset.motion_data_dir = os.path.join(
-            LEGGED_LAB_ROOT_DIR, "data", "MotionData", "g1_29dof", "amp", "walk"
+            LEGGED_LAB_ROOT_DIR, "data", "MotionData", "g1_29dof", "amp", "walk_and_run"
         )
         self.motion_data.motion_dataset.motion_data_weights = {
-            "B10_-__Walk_turn_left_45_stageii": 1.0, 
+            "B10_-__Walk_turn_left_45_stageii": 1.0,
             "B11_-__Walk_turn_left_135_stageii": 1.0,
             "B13_-__Walk_turn_right_90_stageii": 1.0,
             "B14_-__Walk_turn_right_45_t2_stageii": 1.0,
-            "B15_-__Walk_turn_around_stageii": 5.0,
+            "B15_-__Walk_turn_around_stageii": 1.0,
             "B22_-__side_step_left_stageii": 1.0,
             "B23_-__side_step_right_stageii": 1.0,
-            "B4_-_Stand_to_Walk_backwards_stageii": 5.0,
+            "B4_-_Stand_to_Walk_backwards_stageii": 1.0,
             "B9_-__Walk_turn_left_90_stageii": 1.0,
+            "C11_-_run_turn_left_90_stageii": 1.0,
+            "C12_-_run_turn_left_45_stageii": 1.0,
+            "C13_-_run_turn_left_135_stageii": 1.0,
+            "C14_-_run_turn_right_90_stageii": 1.0,
+            "C15_-_run_turn_right_45_stageii": 1.0,
+            "C16_-_run_turn_right_135_stageii": 1.0,
+            "C17_-_run_change_direction_stageii": 1.0,
+            "C1_-_stand_to_run_stageii": 1.0,
+            "C3_-_run_stageii": 1.0,
+            "C4_-_run_to_walk_a_stageii": 1.0,
+            "C5_-_walk_to_run_stageii": 1.0,
+            "C6_-_stand_to_run_backwards_stageii": 1.0,
+            "C8_-_run_backwards_to_stand_stageii": 1.0,
+            "C9_-_run_backwards_turn_run_forward_stageii": 1.0,
+            "Walk_B10_-_Walk_turn_left_45_stageii": 1.0,
+            "Walk_B13_-_Walk_turn_right_45_stageii": 1.0,
+            "Walk_B15_-_Walk_turn_around_stageii": 1.0,
+            "Walk_B16_-_Walk_turn_change_stageii": 1.0,
+            "Walk_B22_-_Side_step_left_stageii": 1.0,
+            "Walk_B23_-_Side_step_right_stageii": 1.0,
+            "Walk_B4_-_Stand_to_Walk_Back_stageii": 1.0,
         }
 
         # ------------------------------------------------------
@@ -204,9 +225,9 @@ class G1AmpEnvCfg(LocomotionAmpEnvCfg):
         # ------------------------------------------------------
         # Commands
         # ------------------------------------------------------
-        self.commands.base_velocity.ranges.lin_vel_x = (-1.0, 1.5)
-        self.commands.base_velocity.ranges.lin_vel_y = (-1.0, 1.0)
-        self.commands.base_velocity.ranges.ang_vel_z = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.lin_vel_x = (-0.5, 3.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
         self.commands.base_velocity.ranges.heading = (-math.pi, math.pi)
         
         # ------------------------------------------------------
@@ -230,5 +251,10 @@ class G1AmpEnvCfg_PLAY(G1AmpEnvCfg):
         self.scene.num_envs = 48 
         self.scene.env_spacing = 2.5
         
-
+        self.commands.base_velocity.ranges.lin_vel_x = (0.5, 3.0)
+        self.commands.base_velocity.ranges.lin_vel_y = (-0.5, 0.5)
+        self.commands.base_velocity.ranges.ang_vel_z = (-1.0, 1.0)
+        self.commands.base_velocity.ranges.heading = (0.0, 0.0)
+        
+        self.events.reset_from_ref = None
 

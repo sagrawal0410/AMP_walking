@@ -74,5 +74,6 @@ if __name__ == "__main__":
         print("-", jnt)
 
     body_names = robot.body_names
-    print("Legged Lab body names:")
-    print(body_names)
+    body_masses = robot.data.default_mass[0]
+    for name, mass in zip(body_names, body_masses):
+        print(f"Body: {name}, Mass: {mass} kg")
