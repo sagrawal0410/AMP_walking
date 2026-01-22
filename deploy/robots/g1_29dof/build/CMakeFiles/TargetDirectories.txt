@@ -1,0 +1,4 @@
+/home/liquid/legged_lab/deploy/robots/g1_29dof/build/CMakeFiles/g1_29dof_controller_lib.dir
+/home/liquid/legged_lab/deploy/robots/g1_29dof/build/CMakeFiles/g1_ctrl.dir
+/home/liquid/legged_lab/deploy/robots/g1_29dof/build/CMakeFiles/edit_cache.dir
+/home/liquid/legged_lab/deploy/robots/g1_29dof/build/CMakeFiles/rebuild_cache.dir
