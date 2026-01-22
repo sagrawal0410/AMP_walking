@@ -87,6 +87,7 @@ from rsl_rl.runners import DistillationRunner, OnPolicyRunner
 from isaaclab.envs import (
     DirectMARLEnv,
     DirectMARLEnvCfg,
+    ManagerBasedRLEnv,
     DirectRLEnvCfg,
     ManagerBasedRLEnvCfg,
     multi_agent_to_single_agent,
@@ -102,7 +103,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 
 # Import extensions to set up environment tasks
 import legged_lab.tasks  # noqa: F401
-
+from legged_lab.utils import export_deploy_cfg
 # import logger
 logger = logging.getLogger(__name__)
 
@@ -174,6 +175,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # convert to single-agent instance if required by the RL algorithm
     if isinstance(env.unwrapped, DirectMARLEnv):
         env = multi_agent_to_single_agent(env)
+        
+    if isinstance(env.unwrapped, ManagerBasedRLEnv):
+        export_deploy_cfg.export_deploy_cfg(env.unwrapped, log_dir)
 
     # save resume path before creating a new log_dir
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
@@ -217,6 +221,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     # dump the configuration into log-directory
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    #export_deploy_cfg()
 
     # run training
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)

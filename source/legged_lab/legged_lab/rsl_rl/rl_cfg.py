@@ -4,7 +4,7 @@ from dataclasses import MISSING
 
 from isaaclab.utils import configclass
 
-from isaaclab_rl.rsl_rl import RslRlPpoActorCriticCfg, RslRlPpoAlgorithmCfg, RslRlOnPolicyRunnerCfg
+from isaaclab_rl.rsl_rl import RslRlPpoActorCriticCfg, RslRlPpoActorCriticRecurrentCfg, RslRlPpoAlgorithmCfg, RslRlOnPolicyRunnerCfg
 from .amp_cfg import RslRlAmpCfg
 
 #########################

@@ -2,7 +2,7 @@ import os
 
 from isaaclab.utils import configclass
 
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlSymmetryCfg
+from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlPpoActorCriticCfg, RslRlPpoActorCriticRecurrentCfg, RslRlSymmetryCfg
 from legged_lab.rsl_rl import RslRlPpoAmpAlgorithmCfg, RslRlAmpCfg, RslRlPpoActorCriticConv2dCfg
 from legged_lab import LEGGED_LAB_ROOT_DIR
 from legged_lab.tasks.locomotion.amp.mdp.symmetry import g1
@@ -20,17 +20,17 @@ class G1RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
         "discriminator": ["disc"],
         "discriminator_demonstration": ["disc_demo"]
     }
-    # policy = RslRlPpoActorCriticRecurrentCfg(
-    #     init_noise_std=1.0,
-    #     actor_hidden_dims=[512, 256, 128],
-    #     critic_hidden_dims=[512, 256, 128],
-    #     actor_obs_normalization=False,
-    #     critic_obs_normalization=False,
-    #     activation="elu",
-    #     rnn_type="lstm",
-    #     rnn_hidden_dim=64,
-    #     rnn_num_layers=1
-    # )
+    #policy = RslRlPpoActorCriticRecurrentCfg(
+    #    init_noise_std=1.0,
+    #    actor_hidden_dims=[512, 256, 128],
+    #    critic_hidden_dims=[512, 256, 128],
+    #    actor_obs_normalization=False,
+    #    critic_obs_normalization=False,
+    #    activation="elu",
+    #    rnn_type="lstm",
+    #    rnn_hidden_dim=64,
+    #    rnn_num_layers=1
+    #)
     policy = RslRlPpoActorCriticCfg(
         init_noise_std=1.0,
         actor_hidden_dims=[512, 256, 128],
@@ -68,10 +68,6 @@ class G1RslRlOnPolicyRunnerAmpCfg(RslRlOnPolicyRunnerCfg):
             ),
             loss_type="LSGAN"
         ),
-        symmetry_cfg=RslRlSymmetryCfg(
-            use_data_augmentation=True, data_augmentation_func=g1.compute_symmetric_states,
-            use_mirror_loss=True, mirror_loss_coeff=0.1,
-        )
     )
 
 

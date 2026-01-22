@@ -1,159 +1,307 @@
-import argparse
+import numpy as np
+import os
 import yaml
 
-from isaaclab.app import AppLauncher
-
-# add argparse arguments
-parser = argparse.ArgumentParser(description="Tutorial on running the cartpole RL environment.")
-parser.add_argument("--num_envs", type=int, default=4, help="Number of environments to spawn.")
-parser.add_argument(
-    "--robot", 
-    type=str,
-    default="g1_flat",
-    help="The robot name to be used.",
-)
-
-# append AppLauncher cli args
-AppLauncher.add_app_launcher_args(parser)
-# parse the arguments
-args_cli = parser.parse_args()
-args_cli.headless = True  # set headless to True for this script
-
-# launch omniverse app
-app_launcher = AppLauncher(args_cli)
-simulation_app = app_launcher.app
-
-import os
-import re
-from collections import OrderedDict
-import torch
 from isaaclab.assets import Articulation
-from isaaclab.envs.mdp.actions.joint_actions import JointPositionAction
+from isaaclab.envs import ManagerBasedRLEnv
+from isaaclab.utils import class_to_dict
+from isaaclab.utils.string import resolve_matching_names
 
-if args_cli.robot == "g1_amp":
-    from legged_lab.tasks.locomotion.amp.config.g1.amp_flat_env_cfg import G1AmpFlatEnvCfg as RobotEnvCfg
-    from legged_lab.tasks.locomotion.amp.amp_env import AmpEnv as RobotEnv
-elif args_cli.robot == "g1_flat":
-    from legged_lab.tasks.locomotion.velocity.config.g1.flat_env_cfg import G1FlatEnvCfg as RobotEnvCfg
-    from isaaclab.envs.manager_based_rl_env import ManagerBasedRLEnv as RobotEnv
-elif args_cli.robot == "go2_flat":
-    from legged_lab.tasks.locomotion.velocity.config.go2.flat_env_cfg import UnitreeGo2FlatEnvCfg as RobotEnvCfg
-    from isaaclab.envs.manager_based_rl_env import ManagerBasedRLEnv as RobotEnv
-else:
-    raise ValueError(f"Robot {args_cli.robot} not supported.")
 
-def represent_ordereddict(dumper, data):
-    return dumper.represent_mapping('tag:yaml.org,2002:map', data.items())
+def format_value(x):
+    """Format values for YAML output, converting tuples to lists and handling special types."""
+    if isinstance(x, float):
+        return float(f"{x:.3g}")
+    elif isinstance(x, (tuple, list)):
+        # Convert tuples to lists to avoid !!python/tuple tags in YAML
+        return [format_value(i) for i in x]
+    elif isinstance(x, dict):
+        return {k: format_value(v) for k, v in x.items()}
+    elif isinstance(x, np.ndarray):
+        return format_value(x.tolist())
+    elif isinstance(x, np.integer):
+        return int(x)
+    elif isinstance(x, np.floating):
+        return float(x)
+    else:
+        return x
 
-yaml.add_representer(OrderedDict, represent_ordereddict)
 
-def main():
-    env_cfg = RobotEnvCfg()
-    env_cfg.scene.num_envs = args_cli.num_envs
-    env_cfg.sim.device = args_cli.device
-    
-    env = RobotEnv(cfg=env_cfg)
-    robot: Articulation = env.scene["robot"]
-    
-    output_cfg = OrderedDict()
-    
-    obs_term_names = env.observation_manager.active_terms["policy"]
-    obs_term_cfg = env.observation_manager._group_obs_term_cfgs["policy"] # type: ignore
-    output_cfg["obs_names"] = obs_term_names
-    output_cfg["obs_cfg"] = OrderedDict()
-    for term_name, term_cfg in zip(obs_term_names, obs_term_cfg):
-        output_cfg["obs_cfg"][term_name] = OrderedDict([
-            ("clip", term_cfg.clip if term_cfg.clip else [0.0]),
-            ("scale", float(term_cfg.scale) if term_cfg.scale else 1.0),
-            ("history_length", term_cfg.history_length)
-        ])
-    
-    action_cfg = env_cfg.actions.joint_pos
-    action_term:JointPositionAction = env.action_manager.get_term("joint_pos")
-    
-    # check joint names
-    joint_names = robot.joint_names
-    for i, jnt_name in enumerate(joint_names):
-        if jnt_name != action_term._joint_names[i]: # type: ignore
-            raise ValueError(f"Joint name mismatch: {jnt_name} != {action_term._joint_names[i]}") # type: ignore
-    
-    output_cfg["joint_names"] = joint_names
-    
-    output_cfg["action_cfg"] = OrderedDict()
-    for i, jnt_name in enumerate(joint_names):
-        if action_cfg.clip is not None:
-            clip = action_term._clip[0, i, :].cpu().tolist()  # type: ignore
-            print(f"Joint {jnt_name} clip: {clip}")
+def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
+    asset: Articulation = env.scene["robot"]
+    joint_sdk_names = env.cfg.scene.robot.joint_sdk_names
+    joint_ids_map, _ = resolve_matching_names(asset.data.joint_names, joint_sdk_names, preserve_order=True)
+
+    cfg = {}  # noqa: SIM904
+    cfg["joint_ids_map"] = joint_ids_map
+    cfg["step_dt"] = env.cfg.sim.dt * env.cfg.decimation
+    stiffness = np.zeros(len(joint_sdk_names))
+    stiffness[joint_ids_map] = asset.data.default_joint_stiffness[0].detach().cpu().numpy().tolist()
+    cfg["stiffness"] = stiffness.tolist()
+    damping = np.zeros(len(joint_sdk_names))
+    damping[joint_ids_map] = asset.data.default_joint_damping[0].detach().cpu().numpy().tolist()
+    cfg["damping"] = damping.tolist()
+    # default_joint_pos should be in SDK joint order (same as stiffness/damping)
+    default_joint_pos = np.zeros(len(joint_sdk_names))
+    default_joint_pos[joint_ids_map] = asset.data.default_joint_pos[0].detach().cpu().numpy().tolist()
+    cfg["default_joint_pos"] = default_joint_pos.tolist()
+
+    # --- commands ---
+    cfg["commands"] = {}
+    if hasattr(env.cfg.commands, "base_velocity"):  # some environments do not have base_velocity command
+        cfg["commands"]["base_velocity"] = {}
+        if hasattr(env.cfg.commands.base_velocity, "limit_ranges"):
+            ranges = env.cfg.commands.base_velocity.limit_ranges.to_dict()
         else:
-            clip = [0.0] # https://github.com/ros2/rclcpp/issues/1955
-        
-        if isinstance(action_cfg.scale, (float, int)):
-            scale = float(action_cfg.scale)
-        elif isinstance(action_cfg.scale, dict):
-            scale = action_term._scale[0, i].item() # type: ignore
+            ranges = env.cfg.commands.base_velocity.ranges.to_dict()
+        for item_name in ["lin_vel_x", "lin_vel_y", "ang_vel_z"]:
+            ranges[item_name] = list(ranges[item_name])
+        # Handle heading - convert tuple to list or set to null
+        if "heading" in ranges:
+            if ranges["heading"] is None:
+                ranges["heading"] = None
+            elif isinstance(ranges["heading"], (tuple, list)):
+                # Convert tuple/list to list, but if it's a range tuple, keep as list
+                ranges["heading"] = list(ranges["heading"]) if len(ranges["heading"]) > 0 else None
+            # If it's already a list, keep it as is
         else:
-            scale = 1.0
+            ranges["heading"] = None
+        cfg["commands"]["base_velocity"]["ranges"] = ranges
+
+    # --- actions ---
+    action_names = env.action_manager.active_terms
+    action_terms = zip(action_names, env.action_manager._terms.values())
+    cfg["actions"] = {}
+    for action_name, action_term in action_terms:
+        term_cfg = action_term.cfg.copy()
         
-        found = False
-        kp = 0.0
-        kd = 0.0
-        for key, value in env_cfg.scene.robot.actuators.items():
-            for expr in value.joint_names_expr:
-                if re.fullmatch(expr, jnt_name):
-                    found = True
-
-                    if isinstance(value.stiffness, float):
-                        kp = value.stiffness
-                    elif isinstance(value.stiffness, dict):
-                        for k, v in value.stiffness.items():
-                            if re.fullmatch(k, jnt_name):
-                                kp = v
-                                break
-                    else:
-                        raise ValueError(f"Unsupported stiffness type for joint {jnt_name}: {type(value.stiffness)}")
-                    
-                    if isinstance(value.damping, float):
-                        kd = value.damping
-                    elif isinstance(value.damping, dict):
-                        for k, v in value.damping.items():
-                            if re.fullmatch(k, jnt_name):
-                                kd = v
-                                break
-                    else:
-                        raise ValueError(f"Unsupported damping type for joint {jnt_name}: {type(value.damping)}")
-                    
-                    # found, so break the loop
-                    break
-            if found:
-                break
-        if not found:
-            raise ValueError(f"Joint {jnt_name} not found in Robot Cfg (ArticulationCfg)'s actuators.")
+        # Get the class name from class_type before converting to dict
+        action_class_name = term_cfg.class_type.__name__
         
-        default_pos = robot.data.default_joint_pos[0, i].item()
+        if isinstance(term_cfg.scale, float):
+            term_cfg.scale = [term_cfg.scale for _ in range(action_term.action_dim)]
+        else:  # dict
+            term_cfg.scale = action_term._scale[0].detach().cpu().numpy().tolist()
+
+        if term_cfg.clip is not None:
+            term_cfg.clip = action_term._clip[0].detach().cpu().numpy().tolist()
+
+        # Handle offset for JointPositionAction and JointVelocityAction
+        if action_class_name in ["JointPositionAction", "JointVelocityAction"]:
+            if term_cfg.use_default_offset:
+                term_cfg.offset = action_term._offset[0].detach().cpu().numpy().tolist()
+            else:
+                term_cfg.offset = [0.0 for _ in range(action_term.action_dim)]
+
+        # clean cfg
+        term_cfg = term_cfg.to_dict()
+
+        for _ in ["class_type", "asset_name", "debug_vis", "preserve_order", "use_default_offset"]:
+            if _ in term_cfg:
+                del term_cfg[_]
         
-        output_cfg["action_cfg"][jnt_name] = OrderedDict([
-            ("clip", clip),
-            ("scale", scale),
-            ("kp", kp),
-            ("kd", kd),
-            ("default_pos", default_pos),
-        ])
+        # Ensure offset is always a list (not a scalar) if it exists and is not None
+        # The deploy code expects offset to be either null or a vector
+        if "offset" in term_cfg:
+            if term_cfg["offset"] is None:
+                # Keep as None (will be written as null in YAML)
+                pass
+            elif isinstance(term_cfg["offset"], (int, float)):
+                # Convert scalar to list
+                term_cfg["offset"] = [float(term_cfg["offset"]) for _ in range(action_term.action_dim)]
+            elif not isinstance(term_cfg["offset"], list):
+                # Convert other types to list if needed
+                term_cfg["offset"] = list(term_cfg["offset"])
+        
+        # Use class name instead of term name for deploy compatibility
+        cfg["actions"][action_class_name] = term_cfg
+
+        if action_term._joint_ids == slice(None):
+            cfg["actions"][action_class_name]["joint_ids"] = None
+        else:
+            cfg["actions"][action_class_name]["joint_ids"] = action_term._joint_ids
+
+    # --- observations ---
+    # List of observations registered in the deploy code
+    # These are the only observations that can be used in deploy.yaml
+    registered_observations = {
+        "base_ang_vel",
+        "projected_gravity",
+        "joint_pos",
+        "joint_pos_rel",
+        "joint_vel_rel",
+        "last_action",
+        "velocity_commands",
+        "gait_phase",
+        "keyboard_velocity_commands",  # Robot-specific, registered in State_RLBase.cpp
+    }
     
-    # export the configuration to a YAML file
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_file = os.path.join(script_dir, f"deploy_config_{args_cli.robot}.yaml")
-    with open(output_file, 'w') as f:
-        yaml.dump(output_cfg, f, default_flow_style=False, allow_unicode=True)
+    # Map from training observation names to deploy observation names
+    # This is needed because training uses different names than deploy function names
+    obs_name_mapping = {
+        "actions": "last_action",  # training uses "actions", deploy uses "last_action"
+        "joint_vel": "joint_vel_rel",  # training uses "joint_vel" with joint_vel_rel function
+        "joint_pos": "joint_pos_rel",  # training uses "joint_pos" with joint_pos_rel function (for velocity tasks)
+        # Note: For AMP tasks, joint_pos might use joint_pos function (not joint_pos_rel)
+        # We'll check the function name to override if needed
+    }
     
-    print(f"Configuration exported to {output_file}")
+    obs_names = env.observation_manager.active_terms["policy"]
+    obs_cfgs = env.observation_manager._group_obs_term_cfgs["policy"]
+    obs_terms = zip(obs_names, obs_cfgs)
+    cfg["observations"] = {}
+    for obs_name, obs_cfg in obs_terms:
+        # Get the function name to determine the deploy observation name
+        func_name = obs_cfg.func.__name__ if hasattr(obs_cfg.func, '__name__') else str(obs_cfg.func)
+        
+        # Determine deploy observation name
+        # Priority: 1) function name if registered (most accurate), 2) explicit mapping, 3) original name if registered
+        deploy_obs_name = None
+        
+        # Check if function name is registered first (most accurate mapping)
+        # This handles cases where training name differs from function name
+        if func_name in registered_observations:
+            deploy_obs_name = func_name
+        # Check explicit mapping second
+        elif obs_name in obs_name_mapping:
+            deploy_obs_name = obs_name_mapping[obs_name]
+        # Check if original name is registered
+        elif obs_name in registered_observations:
+            deploy_obs_name = obs_name
+        # Special case: generated_commands -> velocity_commands or keyboard_velocity_commands
+        elif func_name == "generated_commands":
+            # Use keyboard_velocity_commands if available, otherwise velocity_commands
+            if "keyboard_velocity_commands" in registered_observations:
+                deploy_obs_name = "keyboard_velocity_commands"
+            elif "velocity_commands" in registered_observations:
+                deploy_obs_name = "velocity_commands"
+        
+        # Skip if no valid deploy observation name found
+        if deploy_obs_name is None:
+            print(f"[WARNING] Skipping observation '{obs_name}' (func: {func_name}) - not registered in deploy code")
+            continue
+        
+        # Special handling for keyboard_velocity_commands - use velocity_commands params
+        if deploy_obs_name == "keyboard_velocity_commands":
+            # keyboard_velocity_commands uses the same params as velocity_commands
+            # but is registered separately in State_RLBase.cpp
+            pass
+            
+        obs_dims = tuple(obs_cfg.func(env, **obs_cfg.params).shape)
+        term_cfg = obs_cfg.copy()
+        
+        # Handle scale - extract from config properly (matching export_deploy_cfg_other.py)
+        if term_cfg.scale is not None:
+            # Try to detach if it's a tensor, otherwise use as-is
+            try:
+                if hasattr(term_cfg.scale, 'detach'):
+                    scale = term_cfg.scale.detach().cpu().numpy().tolist()
+                elif isinstance(term_cfg.scale, (list, tuple, np.ndarray)):
+                    scale = list(term_cfg.scale) if not isinstance(term_cfg.scale, np.ndarray) else term_cfg.scale.tolist()
+                else:
+                    scale = term_cfg.scale
+            except:
+                # Fallback: try direct conversion
+                scale = term_cfg.scale
+            
+            if isinstance(scale, float):
+                term_cfg.scale = [scale for _ in range(obs_dims[1])]
+            else:
+                term_cfg.scale = scale
+        else:
+            term_cfg.scale = [1.0 for _ in range(obs_dims[1])]
+        
+        # Handle clip - extract from config properly
+        if term_cfg.clip is not None:
+            try:
+                if hasattr(term_cfg.clip, 'detach'):
+                    term_cfg.clip = term_cfg.clip.detach().cpu().numpy().tolist()
+                elif isinstance(term_cfg.clip, (list, tuple, np.ndarray)):
+                    term_cfg.clip = list(term_cfg.clip) if not isinstance(term_cfg.clip, np.ndarray) else term_cfg.clip.tolist()
+                else:
+                    term_cfg.clip = list(term_cfg.clip)
+            except:
+                # Fallback: try direct conversion
+                term_cfg.clip = list(term_cfg.clip) if hasattr(term_cfg.clip, '__iter__') else None
+        
+        if term_cfg.history_length == 0:
+            term_cfg.history_length = 1
+
+        # clean cfg
+        term_cfg = term_cfg.to_dict()
+        for _ in ["func", "modifiers", "noise", "flatten_history_dim"]:
+            if _ in term_cfg:
+                del term_cfg[_]
+        
+        # Ensure params is a dict (not None or missing)
+        # Params should come from obs_cfg.params, not term_cfg
+        if hasattr(obs_cfg, 'params') and obs_cfg.params is not None:
+            # Convert params to dict if it's a config object
+            if hasattr(obs_cfg.params, 'to_dict'):
+                term_cfg["params"] = obs_cfg.params.to_dict()
+            elif isinstance(obs_cfg.params, dict):
+                term_cfg["params"] = obs_cfg.params.copy()
+            else:
+                # Try to convert to dict
+                try:
+                    term_cfg["params"] = dict(obs_cfg.params) if hasattr(obs_cfg.params, '__iter__') else {}
+                except:
+                    term_cfg["params"] = {}
+        elif "params" not in term_cfg or term_cfg.get("params") is None:
+            term_cfg["params"] = {}
+        elif not isinstance(term_cfg["params"], dict):
+            # Convert to dict if it's not already
+            term_cfg["params"] = dict(term_cfg["params"]) if hasattr(term_cfg["params"], '__iter__') else {}
+        
+        # Ensure params is always a dict (never None)
+        if term_cfg.get("params") is None:
+            term_cfg["params"] = {}
+        
+        # Ensure clip is None (not empty list) if not set
+        if "clip" in term_cfg:
+            if term_cfg["clip"] is None:
+                pass  # Keep as None
+            elif isinstance(term_cfg["clip"], list) and len(term_cfg["clip"]) == 0:
+                term_cfg["clip"] = None
+            elif isinstance(term_cfg["clip"], np.ndarray) and term_cfg["clip"].size == 0:
+                term_cfg["clip"] = None
+        
+        # Use deploy observation name (not training name)
+        cfg["observations"][deploy_obs_name] = term_cfg
+
+    # --- save config file ---
+    filename = os.path.join(log_dir, "params", "deploy.yaml")
+    if not os.path.exists(os.path.dirname(filename)):
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+    if not isinstance(cfg, dict):
+        cfg = class_to_dict(cfg)
     
-    env.close()
-
-
-
-if __name__ == "__main__":
-    main()
-    simulation_app.close()
-
-
+    # Format all values to ensure proper YAML serialization
+    # This converts tuples to lists, numpy types to Python types, etc.
+    cfg = format_value(cfg)
+    
+    # Final pass: ensure no Python-specific types remain
+    def clean_yaml_types(obj):
+        """Recursively clean Python-specific types for YAML."""
+        if isinstance(obj, dict):
+            return {k: clean_yaml_types(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [clean_yaml_types(item) for item in obj]
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, (np.bool_, bool)):
+            return bool(obj)
+        else:
+            return obj
+    
+    cfg = clean_yaml_types(cfg)
+    
+    # Use SafeDumper to avoid Python-specific tags like !!python/tuple
+    # and ensure clean YAML output
+    with open(filename, "w") as f:
+        yaml.dump(cfg, f, default_flow_style=None, sort_keys=False, allow_unicode=True, Dumper=yaml.SafeDumper)
 
