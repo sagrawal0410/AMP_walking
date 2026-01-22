@@ -120,7 +120,7 @@ void State_RLBase::run()
             spdlog::error("Invalid action[{}]: {} (NaN/Inf detected)! Using current position.", i, action_val);
             action_val = lowstate->msg_.motor_state()[motor_idx].q();
         }
-        action_val = std::clamp(action_val, -3.14f, 3.14f);
+        action_val = std::clamp(action_val, -1.0f, 1.0f);
         lowcmd->msg_.motor_cmd()[motor_idx].q() = action_val;
     }
 }
