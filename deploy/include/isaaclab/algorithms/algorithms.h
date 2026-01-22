@@ -103,16 +103,27 @@ public:
             const std::string name_str(input_names[i]);
             auto& input_data = obs.at(name_str);
             
-            // Validate size matches expected
-            if(input_data.size() != input_sizes[i]) {
-                spdlog::error("Observation[{}] size mismatch: got {}, expected {}", name_str, input_data.size(), input_sizes[i]);
-                std::lock_guard<std::mutex> lock(act_mtx_);
-                std::fill(action.begin(), action.end(), 0.0f);
-                return action;
+            // Handle size mismatch: pad with zeros if observation is smaller than expected
+            if(input_data.size() < input_sizes[i]) {
+                spdlog::warn("Observation[{}] size mismatch: got {}, expected {}. Padding with zeros.", name_str, input_data.size(), input_sizes[i]);
+                // Create a padded copy of the observation
+                std::vector<float> padded_data(input_sizes[i], 0.0f);
+                std::copy(input_data.begin(), input_data.end(), padded_data.begin());
+                auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, padded_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
+                input_tensors.push_back(std::move(input_tensor));
             }
-            
-            auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, input_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
-            input_tensors.push_back(std::move(input_tensor));
+            else if(input_data.size() > input_sizes[i]) {
+                spdlog::error("Observation[{}] size mismatch: got {}, expected {}. Truncating.", name_str, input_data.size(), input_sizes[i]);
+                // Create a truncated copy of the observation
+                std::vector<float> truncated_data(input_data.begin(), input_data.begin() + input_sizes[i]);
+                auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, truncated_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
+                input_tensors.push_back(std::move(input_tensor));
+            }
+            else {
+                // Size matches exactly
+                auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, input_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
+                input_tensors.push_back(std::move(input_tensor));
+            }
         }
 
         // Run the model
