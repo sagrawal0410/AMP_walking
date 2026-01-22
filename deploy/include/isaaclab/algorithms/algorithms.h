@@ -4,11 +4,17 @@
 #pragma once
 
 #include "onnxruntime_cxx_api.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <iostream>
 #include <mutex>
-#include <cmath>
-#include <algorithm>
 #include <spdlog/spdlog.h>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace isaaclab
 {
@@ -23,8 +29,9 @@ public:
         std::lock_guard<std::mutex> lock(act_mtx_);
         return action;
     }
-    
+
     std::vector<float> action;
+
 protected:
     std::mutex act_mtx_;
 };
@@ -32,123 +39,215 @@ protected:
 class OrtRunner : public Algorithms
 {
 public:
-    OrtRunner(std::string model_path)
+    explicit OrtRunner(const std::string& model_path)
     {
-        // Init Model
+        // Init ORT runtime
         env = Ort::Env(ORT_LOGGING_LEVEL_WARNING, "onnx_model");
         session_options.SetGraphOptimizationLevel(ORT_ENABLE_EXTENDED);
 
         session = std::make_unique<Ort::Session>(env, model_path.c_str(), session_options);
 
-        for (size_t i = 0; i < session->GetInputCount(); ++i) {
+        // ---- Inputs ----
+        const size_t num_inputs = session->GetInputCount();
+        input_names_str.reserve(num_inputs);
+        input_names.reserve(num_inputs);
+        input_shapes.reserve(num_inputs);
+        input_sizes.reserve(num_inputs);
+
+        for (size_t i = 0; i < num_inputs; ++i) {
             Ort::TypeInfo input_type = session->GetInputTypeInfo(i);
-            input_shapes.push_back(input_type.GetTensorTypeAndShapeInfo().GetShape());
-            auto input_name = session->GetInputNameAllocated(i, allocator);
-            input_names.push_back(input_name.release());
-        }
 
-        for (const auto& shape : input_shapes) {
-            size_t size = 1;
-            for (const auto& dim : shape) {
-                size *= dim;
+            // Get name safely (copy into std::string so no leaks)
+            auto input_name_alloc = session->GetInputNameAllocated(i, allocator);
+            input_names_str.emplace_back(input_name_alloc.get());
+
+            // Store C-string pointers that remain valid (strings won't reallocate after reserve)
+            input_names.push_back(input_names_str.back().c_str());
+
+            // Get shape and sanitize dynamic dims (-1 -> 1)
+            auto shape = input_type.GetTensorTypeAndShapeInfo().GetShape();
+            for (auto& d : shape) {
+                if (d < 0) d = 1;  // dynamic -> assume batch=1
             }
-            input_sizes.push_back(size);
+            input_shapes.push_back(shape);
+
+            // Compute expected input size (numel)
+            size_t sz = 1;
+            for (const auto& dim : shape) {
+                sz *= static_cast<size_t>(dim);
+            }
+            input_sizes.push_back(sz);
         }
 
-        // Get output shape
+        // ---- Outputs ----
         Ort::TypeInfo output_type = session->GetOutputTypeInfo(0);
         output_shape = output_type.GetTensorTypeAndShapeInfo().GetShape();
-        auto output_name = session->GetOutputNameAllocated(0, allocator);
-        output_names.push_back(output_name.release());
+        for (auto& d : output_shape) {
+            if (d < 0) d = 1;
+        }
 
-        action.resize(output_shape[1]);
+        auto output_name_alloc = session->GetOutputNameAllocated(0, allocator);
+        output_names_str.emplace_back(output_name_alloc.get());
+        output_names.push_back(output_names_str.back().c_str());
+
+        // Try to infer action dim from output shape (usually [1, action_dim])
+        size_t action_dim = 0;
+        if (output_shape.size() >= 2) {
+            action_dim = static_cast<size_t>(output_shape[1]);
+        } else if (!output_shape.empty()) {
+            action_dim = static_cast<size_t>(output_shape.back());
+        }
+
+        if (action_dim == 0) {
+            // Fallback: safe default; will resize dynamically after first Run()
+            action_dim = 1;
+        }
+
+        action.resize(action_dim, 0.0f);
     }
 
-    std::vector<float> act(std::unordered_map<std::string, std::vector<float>> obs)
+    std::vector<float> act(std::unordered_map<std::string, std::vector<float>> obs) override
     {
         auto memory_info = Ort::MemoryInfo::CreateCpu(OrtDeviceAllocator, OrtMemTypeCPU);
 
-        // make sure all input names are in obs
-        for (const auto& name : input_names) {
+        // Ensure all required input names exist
+        for (const auto& name_c : input_names) {
+            const std::string name(name_c);
             if (obs.find(name) == obs.end()) {
-                throw std::runtime_error("Input name " + std::string(name) + " not found in observations.");
+                throw std::runtime_error("Input name '" + name + "' not found in observations.");
             }
         }
 
-        // Validate observations before passing to policy
+        // Validate observations (NaN/Inf guard)
         bool obs_valid = true;
-        for (const auto& name : input_names) {
-            const std::string name_str(name);
-            auto& input_data = obs.at(name_str);
-            for(size_t i = 0; i < input_data.size(); ++i) {
-                if(!std::isfinite(input_data[i])) {
-                    spdlog::error("Invalid observation[{}][{}] = {} (NaN/Inf detected)!", name_str, i, input_data[i]);
+        for (const auto& name_c : input_names) {
+            const std::string name(name_c);
+            auto& input_data = obs.at(name);
+            for (size_t i = 0; i < input_data.size(); ++i) {
+                if (!std::isfinite(input_data[i])) {
+                    spdlog::error("Invalid observation['{}'][{}] = {} (NaN/Inf)!", name, i, input_data[i]);
                     obs_valid = false;
                 }
             }
         }
-        
-        // If observations are invalid, return zero actions
-        if(!obs_valid) {
+
+        // If invalid obs, return zero actions (safe behavior)
+        if (!obs_valid) {
             spdlog::error("Invalid observations detected! Returning zero actions.");
             std::lock_guard<std::mutex> lock(act_mtx_);
             std::fill(action.begin(), action.end(), 0.0f);
             return action;
         }
 
-        // Create input tensors
+        // IMPORTANT:
+        // We must keep any padded/truncated buffers alive until AFTER session->Run completes.
+        // Otherwise input tensors will point to freed memory -> haywire behavior.
+        std::vector<std::vector<float>> owned_buffers;
+        owned_buffers.reserve(input_names.size());
+
+        // Build input tensors
         std::vector<Ort::Value> input_tensors;
-        for(int i(0); i<input_names.size(); ++i)
-        {
-            const std::string name_str(input_names[i]);
-            auto& input_data = obs.at(name_str);
-            
-            // Handle size mismatch: pad with zeros if observation is smaller than expected
-            if(input_data.size() < input_sizes[i]) {
-                spdlog::warn("Observation[{}] size mismatch: got {}, expected {}. Padding with zeros.", name_str, input_data.size(), input_sizes[i]);
-                // Create a padded copy of the observation
-                std::vector<float> padded_data(input_sizes[i], 0.0f);
-                std::copy(input_data.begin(), input_data.end(), padded_data.begin());
-                auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, padded_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
-                input_tensors.push_back(std::move(input_tensor));
-            }
-            else if(input_data.size() > input_sizes[i]) {
-                spdlog::error("Observation[{}] size mismatch: got {}, expected {}. Truncating.", name_str, input_data.size(), input_sizes[i]);
-                // Create a truncated copy of the observation
-                std::vector<float> truncated_data(input_data.begin(), input_data.begin() + input_sizes[i]);
-                auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, truncated_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
-                input_tensors.push_back(std::move(input_tensor));
-            }
-            else {
-                // Size matches exactly
-                auto input_tensor = Ort::Value::CreateTensor<float>(memory_info, input_data.data(), input_sizes[i], input_shapes[i].data(), input_shapes[i].size());
-                input_tensors.push_back(std::move(input_tensor));
+        input_tensors.reserve(input_names.size());
+
+        for (size_t i = 0; i < input_names.size(); ++i) {
+            const std::string name(input_names[i]);
+            auto& input_data = obs.at(name);
+
+            const size_t expected = input_sizes[i];
+            const size_t got = input_data.size();
+
+            if (got != expected) {
+                spdlog::warn(
+                    "Observation['{}'] size mismatch: got {}, expected {}. Fixing (pad/truncate).",
+                    name, got, expected
+                );
+
+                // Allocate owned buffer of correct size and fill with zeros
+                owned_buffers.emplace_back(expected, 0.0f);
+                auto& buf = owned_buffers.back();
+
+                const size_t copy_n = std::min(got, expected);
+                std::copy(input_data.begin(), input_data.begin() + copy_n, buf.begin());
+
+                input_tensors.emplace_back(
+                    Ort::Value::CreateTensor<float>(
+                        memory_info,
+                        buf.data(),
+                        buf.size(),
+                        input_shapes[i].data(),
+                        input_shapes[i].size()
+                    )
+                );
+            } else {
+                // Use input_data directly (no extra allocation)
+                input_tensors.emplace_back(
+                    Ort::Value::CreateTensor<float>(
+                        memory_info,
+                        input_data.data(),
+                        expected,
+                        input_shapes[i].data(),
+                        input_shapes[i].size()
+                    )
+                );
             }
         }
 
         // Run the model
-        auto output_tensor = session->Run(Ort::RunOptions{nullptr}, input_names.data(), input_tensors.data(), input_tensors.size(), output_names.data(), 1);
+        auto outputs = session->Run(
+            Ort::RunOptions{nullptr},
+            input_names.data(),
+            input_tensors.data(),
+            input_tensors.size(),
+            output_names.data(),
+            output_names.size()
+        );
 
-        // Copy output data
-        auto floatarr = output_tensor.front().GetTensorMutableData<float>();
-        std::lock_guard<std::mutex> lock(act_mtx_);
-        std::memcpy(action.data(), floatarr, output_shape[1] * sizeof(float));
-        
-        // Validate policy output
+        if (outputs.empty()) {
+            spdlog::error("ONNXRuntime returned no outputs! Returning zero actions.");
+            std::lock_guard<std::mutex> lock(act_mtx_);
+            std::fill(action.begin(), action.end(), 0.0f);
+            return action;
+        }
+
+        // Read output tensor and resize action dynamically if needed
+        auto& out0 = outputs.front();
+        auto out_shape = out0.GetTensorTypeAndShapeInfo().GetShape();
+
+        // Infer actual output length (numel)
+        size_t out_numel = 1;
+        for (auto d : out_shape) {
+            if (d < 0) d = 1;
+            out_numel *= static_cast<size_t>(d);
+        }
+
+        float* out_ptr = out0.GetTensorMutableData<float>();
+
+        {
+            std::lock_guard<std::mutex> lock(act_mtx_);
+            if (action.size() != out_numel) {
+                action.resize(out_numel, 0.0f);
+            }
+            std::memcpy(action.data(), out_ptr, action.size() * sizeof(float));
+        }
+
+        // Validate action outputs
         bool action_valid = true;
-        for(size_t i = 0; i < action.size(); ++i) {
-            if(!std::isfinite(action[i])) {
-                spdlog::error("Policy output NaN/Inf at action[{}] = {}! Setting to zero.", i, action[i]);
-                action[i] = 0.0f;
-                action_valid = false;
+        {
+            std::lock_guard<std::mutex> lock(act_mtx_);
+            for (size_t i = 0; i < action.size(); ++i) {
+                if (!std::isfinite(action[i])) {
+                    spdlog::error("Policy output NaN/Inf at action[{}] = {}. Setting to zero.", i, action[i]);
+                    action[i] = 0.0f;
+                    action_valid = false;
+                }
             }
         }
-        
-        if(!action_valid) {
-            spdlog::error("Policy produced invalid outputs! All actions set to zero.");
+
+        if (!action_valid) {
+            spdlog::error("Policy produced invalid outputs! Actions sanitized.");
         }
-        
-        return action;
+
+        return get_action();
     }
 
 private:
@@ -157,11 +256,18 @@ private:
     std::unique_ptr<Ort::Session> session;
     Ort::AllocatorWithDefaultOptions allocator;
 
+    // Input/Output names stored safely
+    std::vector<std::string> input_names_str;
     std::vector<const char*> input_names;
+
+    std::vector<std::string> output_names_str;
     std::vector<const char*> output_names;
 
+    // Shapes + sizes
     std::vector<std::vector<int64_t>> input_shapes;
-    std::vector<int64_t> input_sizes;
+    std::vector<size_t> input_sizes;
+
     std::vector<int64_t> output_shape;
 };
-};
+
+} // namespace isaaclab
