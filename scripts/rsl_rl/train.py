@@ -241,7 +241,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 # Print with names if we found them and lengths match, else print indices
                 if names is not None and len(names) == len(dims_obj):
                     for k, v in zip(names, dims_obj):
-                        print(f"  {str(k):40s} -> {int(v)}")
+                        print(f"  {str(k):40s} -> {dim(v)}   raw={v}")
                         total += int(v)
                 else:
                     for i, v in enumerate(dims_obj):
