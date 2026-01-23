@@ -170,6 +170,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     env_cfg.log_dir = log_dir
         # ------------------- ADD THIS HELPER FUNCTION -------------------
     def dump_obs_terms(env, groups=("policy", "obs", "critic")):
+
+        def dim(v):
+    # v can be int OR tuple like (29, 5)
+            if isinstance(v, (tuple, list)):
+                out = 1
+                for x in v:
+                    out *= int(x)
+                return out
+            return int(v)
         base_env = env.unwrapped if hasattr(env, "unwrapped") else env
         om = getattr(base_env, "observation_manager", None)
         if om is None:
@@ -211,7 +220,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             # Case 1: dict {name: dim}
             if isinstance(dims_obj, dict):
                 for k, v in dims_obj.items():
-                    print(f"  {str(k):40s} -> {int(v)}")
+                    print(f"  {str(k):40s} -> {dim(v)}   raw={v}")
                     total += int(v)
 
             # Case 2: list/tuple [dim0, dim1, ...]
