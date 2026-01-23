@@ -176,34 +176,77 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             print("[dump_obs_terms] No observation_manager found on env.unwrapped")
             return
 
-        print("\n" + "=" * 80)
-        print("[dump_obs_terms] Observation groups available:")
-        # Try to print available group names (different IsaacLab versions store this differently)
+        # Try to fetch the term dims container
+        term_dim = None
         for attr in ["_group_obs_term_dim", "group_obs_term_dim"]:
             if hasattr(om, attr):
-                print("  groups =", list(getattr(om, attr).keys()))
+                term_dim = getattr(om, attr)
+                break
+        if term_dim is None:
+            print("[dump_obs_terms] Could not find group_obs_term_dim on observation_manager")
+            return
+
+        print("\n" + "=" * 80)
+        print("[dump_obs_terms] Groups available:", list(term_dim.keys()))
+        print("=" * 80)
+
+        # Try to fetch term names container (optional, only needed when dims are a list)
+        term_names = None
+        for attr in ["_group_obs_terms", "group_obs_terms", "_group_obs_term_names", "group_obs_term_names"]:
+            if hasattr(om, attr):
+                term_names = getattr(om, attr)
                 break
 
-        # Dump each requested group if present
         for group in groups:
-            term_dim = None
-            for attr in ["_group_obs_term_dim", "group_obs_term_dim"]:
-                if hasattr(om, attr):
-                    term_dim = getattr(om, attr)
-                    break
-
-            if term_dim is None or group not in term_dim:
+            if group not in term_dim:
                 continue
 
+            dims_obj = term_dim[group]
             print("\n" + "-" * 80)
             print(f"[dump_obs_terms] GROUP = {group}")
+            print(f"Type(term_dim[{group}]):", type(dims_obj))
+
             total = 0
-            for k, v in term_dim[group].items():
-                print(f"  {k:40s} -> {v}")
-                total += int(v)
+
+            # Case 1: dict {name: dim}
+            if isinstance(dims_obj, dict):
+                for k, v in dims_obj.items():
+                    print(f"  {str(k):40s} -> {int(v)}")
+                    total += int(v)
+
+            # Case 2: list/tuple [dim0, dim1, ...]
+            elif isinstance(dims_obj, (list, tuple)):
+                # Try to get names for this group
+                names = None
+
+                # If term_names is dict-like keyed by group
+                if isinstance(term_names, dict) and group in term_names:
+                    grp = term_names[group]
+                    # grp might be a dict of term objects or a list of names/objects
+                    if isinstance(grp, dict):
+                        names = list(grp.keys())
+                    elif isinstance(grp, (list, tuple)):
+                        # Could be list of term objects or strings
+                        names = [getattr(x, "name", str(x)) for x in grp]
+
+                # Print with names if we found them and lengths match, else print indices
+                if names is not None and len(names) == len(dims_obj):
+                    for k, v in zip(names, dims_obj):
+                        print(f"  {str(k):40s} -> {int(v)}")
+                        total += int(v)
+                else:
+                    for i, v in enumerate(dims_obj):
+                        print(f"  term[{i:02d}]{'':33s} -> {int(v)}")
+                        total += int(v)
+
+            else:
+                print(f"[dump_obs_terms] Unsupported dims container type: {type(dims_obj)}")
+                continue
+
             print(f"  TOTAL({group}) = {total}")
 
         print("\n" + "=" * 80 + "\n")
+
     # ----------------------------------------------------------------
 
     # create isaac environment
