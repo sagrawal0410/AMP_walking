@@ -221,7 +221,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
             if isinstance(dims_obj, dict):
                 for k, v in dims_obj.items():
                     print(f"  {str(k):40s} -> {dim(v)}   raw={v}")
-                    total += int(v)
+                    total += dim(v)
 
             # Case 2: list/tuple [dim0, dim1, ...]
             elif isinstance(dims_obj, (list, tuple)):
@@ -242,11 +242,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
                 if names is not None and len(names) == len(dims_obj):
                     for k, v in zip(names, dims_obj):
                         print(f"  {str(k):40s} -> {dim(v)}   raw={v}")
-                        total += int(v)
+                        total += dim(v)
                 else:
                     for i, v in enumerate(dims_obj):
                         print(f"  term[{i:02d}]{'':33s} -> {int(v)}")
-                        total += int(v)
+                        total += dim(v)
 
             else:
                 print(f"[dump_obs_terms] Unsupported dims container type: {type(dims_obj)}")
