@@ -168,6 +168,43 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
 
     # set the log directory for the environment (works for all environment types)
     env_cfg.log_dir = log_dir
+        # ------------------- ADD THIS HELPER FUNCTION -------------------
+    def dump_obs_terms(env, groups=("policy", "obs", "critic")):
+        base_env = env.unwrapped if hasattr(env, "unwrapped") else env
+        om = getattr(base_env, "observation_manager", None)
+        if om is None:
+            print("[dump_obs_terms] No observation_manager found on env.unwrapped")
+            return
+
+        print("\n" + "=" * 80)
+        print("[dump_obs_terms] Observation groups available:")
+        # Try to print available group names (different IsaacLab versions store this differently)
+        for attr in ["_group_obs_term_dim", "group_obs_term_dim"]:
+            if hasattr(om, attr):
+                print("  groups =", list(getattr(om, attr).keys()))
+                break
+
+        # Dump each requested group if present
+        for group in groups:
+            term_dim = None
+            for attr in ["_group_obs_term_dim", "group_obs_term_dim"]:
+                if hasattr(om, attr):
+                    term_dim = getattr(om, attr)
+                    break
+
+            if term_dim is None or group not in term_dim:
+                continue
+
+            print("\n" + "-" * 80)
+            print(f"[dump_obs_terms] GROUP = {group}")
+            total = 0
+            for k, v in term_dim[group].items():
+                print(f"  {k:40s} -> {v}")
+                total += int(v)
+            print(f"  TOTAL({group}) = {total}")
+
+        print("\n" + "=" * 80 + "\n")
+    # ----------------------------------------------------------------
 
     # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
@@ -178,6 +215,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         
     if isinstance(env.unwrapped, ManagerBasedRLEnv):
         export_deploy_cfg.export_deploy_cfg(env.unwrapped, log_dir)
+        dump_obs_terms(env, groups=("policy", "obs", "critic"))
+
 
     # save resume path before creating a new log_dir
     if agent_cfg.resume or agent_cfg.algorithm.class_name == "Distillation":
