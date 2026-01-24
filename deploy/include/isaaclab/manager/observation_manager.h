@@ -6,6 +6,9 @@
 #include <eigen3/Eigen/Dense>
 #include <yaml-cpp/yaml.h>
 #include <unordered_set>
+#include <map>
+#include <algorithm>
+#include <spdlog/spdlog.h>
 #include "isaaclab/manager/manager_term_cfg.h"
 #include <iostream>
 
@@ -111,14 +114,24 @@ protected:
     {
         std::vector<ObservationTermCfg> terms;
         bool scale_first = false; // isaaclab default: clip first
+        
+        // Check if obs_order is specified in the parent config (for AMP policies)
+        std::vector<std::string> obs_order;
+        if(this->cfg["obs_order"].IsDefined()) {
+            obs_order = this->cfg["obs_order"].as<std::vector<std::string>>();
+        }
+        
+        // Build a map of term configs first
+        std::map<std::string, ObservationTermCfg> term_map;
+        
         for(auto it = group_cfg.begin(); it != group_cfg.end(); ++it)
         {
             std::string key = it->first.as<std::string>();
-            if(it->first.as<std::string>() == "scale_first") {
+            if(key == "scale_first") {
                 scale_first = it->second.as<bool>();
                 continue;
             }
-            if(it->first.as<std::string>() == "use_gym_history") { // set only once
+            if(key == "use_gym_history") { // set only once
                 use_gym_history = it->second.as<bool>();
                 continue;
             }
@@ -130,7 +143,7 @@ protected:
             term_cfg.scale_first = scale_first;
             term_cfg.history_length = term_yaml_cfg["history_length"].as<int>(1);
 
-            auto term_name = it->first.as<std::string>();
+            auto term_name = key;
             if(observations_map()[term_name] == nullptr) {
                 throw std::runtime_error("Observation term '" + term_name + "' is not registered.");
             }
@@ -143,12 +156,36 @@ protected:
             }
             term_cfg.func = observations_map()[term_name];   
 
-
             auto obs = term_cfg.func(this->env, term_cfg.params);
             term_cfg.reset(obs);
 
-            terms.push_back(term_cfg);
+            term_map[term_name] = term_cfg;
         }
+        
+        // Build terms list in obs_order if specified, otherwise use map order
+        if(!obs_order.empty()) {
+            // Use obs_order to preserve exact ordering
+            for(const auto& term_name : obs_order) {
+                if(term_map.find(term_name) != term_map.end()) {
+                    terms.push_back(term_map[term_name]);
+                } else {
+                    spdlog::warn("Observation term '{}' in obs_order not found in observations config", term_name);
+                }
+            }
+            // Add any remaining terms not in obs_order (shouldn't happen, but be safe)
+            for(const auto& pair : term_map) {
+                if(std::find(obs_order.begin(), obs_order.end(), pair.first) == obs_order.end()) {
+                    spdlog::warn("Observation term '{}' not in obs_order, appending at end", pair.first);
+                    terms.push_back(pair.second);
+                }
+            }
+        } else {
+            // No obs_order specified, use map order (original behavior)
+            for(const auto& pair : term_map) {
+                terms.push_back(pair.second);
+            }
+        }
+        
         return terms;
     }
 

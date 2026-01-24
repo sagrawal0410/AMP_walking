@@ -266,6 +266,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
         env = multi_agent_to_single_agent(env)
         
     if isinstance(env.unwrapped, ManagerBasedRLEnv):
+        # Reset environment once to ensure all observations are properly initialized
+        # This is critical for AMP policies with key_body_pos_b and root_local_rot_tan_norm
+        env.reset()
+        # Export deploy config after reset to ensure all observation terms are available
         export_deploy_cfg.export_deploy_cfg(env.unwrapped, log_dir)
         dump_obs_terms(env, groups=("policy", "obs", "critic"))
 

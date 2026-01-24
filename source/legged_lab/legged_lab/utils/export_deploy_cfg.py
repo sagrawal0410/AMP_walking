@@ -129,27 +129,34 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         "projected_gravity",
         "joint_pos",
         "joint_pos_rel",
+        "joint_vel",
         "joint_vel_rel",
         "last_action",
         "velocity_commands",
         "gait_phase",
         "keyboard_velocity_commands",  # Robot-specific, registered in State_RLBase.cpp
+        "root_local_rot_tan_norm",  # AMP-specific
+        "key_body_pos_b",  # AMP-specific
     }
     
     # Map from training observation names to deploy observation names
     # This is needed because training uses different names than deploy function names
     obs_name_mapping = {
         "actions": "last_action",  # training uses "actions", deploy uses "last_action"
-        "joint_vel": "joint_vel_rel",  # training uses "joint_vel" with joint_vel_rel function
-        "joint_pos": "joint_pos_rel",  # training uses "joint_pos" with joint_pos_rel function (for velocity tasks)
-        # Note: For AMP tasks, joint_pos might use joint_pos function (not joint_pos_rel)
-        # We'll check the function name to override if needed
+        # Note: joint_vel/joint_pos mapping depends on function name:
+        # - AMP: uses joint_vel/joint_pos (absolute)
+        # - Velocity: uses joint_vel_rel/joint_pos_rel (relative)
+        # We check function name to determine correct mapping
     }
     
     obs_names = env.observation_manager.active_terms["policy"]
     obs_cfgs = env.observation_manager._group_obs_term_cfgs["policy"]
     obs_terms = zip(obs_names, obs_cfgs)
+    
+    # Store observation order explicitly for AMP policies
+    obs_order = []
     cfg["observations"] = {}
+    
     for obs_name, obs_cfg in obs_terms:
         # Get the function name to determine the deploy observation name
         func_name = obs_cfg.func.__name__ if hasattr(obs_cfg.func, '__name__') else str(obs_cfg.func)
@@ -162,16 +169,21 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         # This handles cases where training name differs from function name
         if func_name in registered_observations:
             deploy_obs_name = func_name
-        # Check explicit mapping second
+        # Check explicit mapping second (for actions -> last_action)
         elif obs_name in obs_name_mapping:
             deploy_obs_name = obs_name_mapping[obs_name]
         # Check if original name is registered
         elif obs_name in registered_observations:
             deploy_obs_name = obs_name
-        # Special case: generated_commands -> velocity_commands or keyboard_velocity_commands
+        # Special case: generated_commands -> keyboard_velocity_commands for AMP, velocity_commands for velocity
         elif func_name == "generated_commands":
-            # Use keyboard_velocity_commands if available, otherwise velocity_commands
-            if "keyboard_velocity_commands" in registered_observations:
+            # For AMP policies, always use keyboard_velocity_commands
+            # Check if this is an AMP env by looking for AMP-specific terms
+            has_amp_terms = any(
+                name in ["root_local_rot_tan_norm", "key_body_pos_b"] 
+                for name in env.observation_manager.active_terms["policy"]
+            )
+            if has_amp_terms and "keyboard_velocity_commands" in registered_observations:
                 deploy_obs_name = "keyboard_velocity_commands"
             elif "velocity_commands" in registered_observations:
                 deploy_obs_name = "velocity_commands"
@@ -257,6 +269,19 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         if term_cfg.get("params") is None:
             term_cfg["params"] = {}
         
+        # Special handling for key_body_pos_b: ensure body_names are exported correctly
+        if deploy_obs_name == "key_body_pos_b" and "params" in term_cfg:
+            # Extract body_names from asset_cfg if present
+            params_dict = term_cfg["params"]
+            if isinstance(params_dict, dict) and "asset_cfg" in params_dict:
+                asset_cfg_dict = params_dict["asset_cfg"]
+                if isinstance(asset_cfg_dict, dict) and "body_names" in asset_cfg_dict:
+                    # Ensure body_names is a list
+                    body_names = asset_cfg_dict["body_names"]
+                    if isinstance(body_names, (list, tuple)):
+                        params_dict["asset_cfg"]["body_names"] = list(body_names)
+                    # Preserve the structure for C++ parsing
+        
         # Ensure clip is None (not empty list) if not set
         if "clip" in term_cfg:
             if term_cfg["clip"] is None:
@@ -268,6 +293,10 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         
         # Use deploy observation name (not training name)
         cfg["observations"][deploy_obs_name] = term_cfg
+        obs_order.append(deploy_obs_name)
+    
+    # Store observation order explicitly (critical for AMP policies)
+    cfg["obs_order"] = obs_order
 
     # --- save config file ---
     filename = os.path.join(log_dir, "params", "deploy.yaml")
