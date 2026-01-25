@@ -45,15 +45,14 @@ public:
                 throw std::runtime_error("joint_ids_map is not a sequence/array");
             }
             
-            // Parse joint_ids_map element by element (more robust with multi-line YAML)
+            // Use iterator-based parsing (more robust with multi-line YAML arrays)
             robot->data.joint_ids_map.clear();
-            for (size_t i = 0; i < joint_ids_node.size(); i++) {
-                try {
-                    int val = joint_ids_node[i].as<int>();
+            for (YAML::const_iterator it = joint_ids_node.begin(); it != joint_ids_node.end(); ++it) {
+                if (it->IsScalar()) {
+                    int val = it->as<int>();
                     robot->data.joint_ids_map.push_back(static_cast<float>(val));
-                } catch (const std::exception& e) {
-                    spdlog::error("Failed to parse joint_ids_map[{}]: {}", i, e.what());
-                    throw;
+                } else {
+                    throw std::runtime_error("joint_ids_map contains non-scalar element");
                 }
             }
             spdlog::debug("Parsed {} joint IDs", robot->data.joint_ids_map.size());
