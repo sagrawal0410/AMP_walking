@@ -93,10 +93,31 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
     spdlog::info("  ONNX File Size: {} bytes ({:.2f} MB)", onnx_size, onnx_size / (1024.0 * 1024.0));
     spdlog::info("========================================");
 
-    env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
-        YAML::LoadFile(deploy_yaml),
-        std::make_shared<unitree::BaseArticulation<LowState_t::SharedPtr>>(FSMState::lowstate)
-    );
+    YAML::Node deploy_cfg;
+    try {
+        spdlog::info("Loading deploy.yaml from: {}", deploy_yaml.string());
+        deploy_cfg = YAML::LoadFile(deploy_yaml.string());
+        spdlog::info("YAML file loaded successfully");
+    } catch (const YAML::BadFile& e) {
+        spdlog::error("Failed to open deploy.yaml file: {}", e.what());
+        throw;
+    } catch (const YAML::ParserException& e) {
+        spdlog::error("YAML parsing error at line {}, column {}: {}", e.mark.line + 1, e.mark.column + 1, e.what());
+        throw;
+    } catch (const std::exception& e) {
+        spdlog::error("Error loading deploy.yaml: {}", e.what());
+        throw;
+    }
+
+    try {
+        env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
+            deploy_cfg,
+            std::make_shared<unitree::BaseArticulation<LowState_t::SharedPtr>>(FSMState::lowstate)
+        );
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to create ManagerBasedRLEnv: {}", e.what());
+        throw;
+    }
     env->alg = std::make_unique<isaaclab::OrtRunner>(policy_onnx);
     
     spdlog::info("Policy loaded successfully!");

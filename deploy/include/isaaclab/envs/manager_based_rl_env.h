@@ -10,6 +10,7 @@
 #include "isaaclab/assets/articulation/articulation.h"
 #include "isaaclab/algorithms/algorithms.h"
 #include <iostream>
+#include <spdlog/spdlog.h>
 #include "isaaclab/utils/utils.h"
 
 namespace isaaclab
@@ -25,24 +26,68 @@ public:
     ManagerBasedRLEnv(YAML::Node cfg, std::shared_ptr<Articulation> robot_)
     :cfg(cfg), robot(std::move(robot_))
     {
-        // Parse configuration
-        this->step_dt = cfg["step_dt"].as<float>();
-        // Parse joint_ids_map as integers first (more robust with YAML), then convert to float
-        auto joint_ids_int = cfg["joint_ids_map"].as<std::vector<int>>();
-        robot->data.joint_ids_map.resize(joint_ids_int.size());
-        for(size_t i = 0; i < joint_ids_int.size(); i++) {
-            robot->data.joint_ids_map[i] = static_cast<float>(joint_ids_int[i]);
+        // Parse configuration with error handling
+        try {
+            spdlog::debug("Parsing step_dt...");
+            this->step_dt = cfg["step_dt"].as<float>();
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to parse step_dt: {}", e.what());
+            throw;
         }
+        
+        try {
+            spdlog::debug("Parsing joint_ids_map...");
+            auto joint_ids_node = cfg["joint_ids_map"];
+            if (!joint_ids_node.IsDefined()) {
+                throw std::runtime_error("joint_ids_map not found in config");
+            }
+            if (!joint_ids_node.IsSequence()) {
+                throw std::runtime_error("joint_ids_map is not a sequence/array");
+            }
+            
+            // Parse joint_ids_map element by element (more robust with multi-line YAML)
+            robot->data.joint_ids_map.clear();
+            for (size_t i = 0; i < joint_ids_node.size(); i++) {
+                try {
+                    int val = joint_ids_node[i].as<int>();
+                    robot->data.joint_ids_map.push_back(static_cast<float>(val));
+                } catch (const std::exception& e) {
+                    spdlog::error("Failed to parse joint_ids_map[{}]: {}", i, e.what());
+                    throw;
+                }
+            }
+            spdlog::debug("Parsed {} joint IDs", robot->data.joint_ids_map.size());
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to parse joint_ids_map: {}", e.what());
+            throw;
+        }
+        
         robot->data.joint_pos.resize(robot->data.joint_ids_map.size());
         robot->data.joint_vel.resize(robot->data.joint_ids_map.size());
 
-        { // default joint positions
+        try {
+            spdlog::debug("Parsing default_joint_pos...");
             auto default_joint_pos = cfg["default_joint_pos"].as<std::vector<float>>();
             robot->data.default_joint_pos = Eigen::VectorXf::Map(default_joint_pos.data(), default_joint_pos.size());
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to parse default_joint_pos: {}", e.what());
+            throw;
         }
-        { // joint stiffness and damping
+        
+        try {
+            spdlog::debug("Parsing stiffness...");
             robot->data.joint_stiffness = cfg["stiffness"].as<std::vector<float>>();
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to parse stiffness: {}", e.what());
+            throw;
+        }
+        
+        try {
+            spdlog::debug("Parsing damping...");
             robot->data.joint_damping = cfg["damping"].as<std::vector<float>>();
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to parse damping: {}", e.what());
+            throw;
         }
 
         robot->update();
