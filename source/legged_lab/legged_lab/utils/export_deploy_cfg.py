@@ -10,6 +10,30 @@ from isaaclab.utils.string import resolve_matching_names
 
 def format_value(x):
     """Format values for YAML output, converting tuples to lists and handling special types."""
+    # Handle None first
+    if x is None:
+        return None
+    
+    # Handle slice objects (can't be serialized)
+    if isinstance(x, slice):
+        return None
+    
+    # Handle config objects (like SceneEntityCfg) that need to be converted to dict first
+    if hasattr(x, 'to_dict') and not isinstance(x, (dict, list, tuple, str, int, float, bool, np.ndarray, np.integer, np.floating)):
+        try:
+            return format_value(x.to_dict())
+        except:
+            pass
+    
+    # Try class_to_dict for objects that can't be serialized
+    try:
+        if not isinstance(x, (dict, list, tuple, str, int, float, bool, np.ndarray, np.integer, np.floating)):
+            converted = class_to_dict(x)
+            if converted != x:  # Only use if conversion actually changed something
+                return format_value(converted)
+    except:
+        pass
+    
     if isinstance(x, float):
         return float(f"{x:.3g}")
     elif isinstance(x, (tuple, list)):
@@ -24,7 +48,13 @@ def format_value(x):
     elif isinstance(x, np.floating):
         return float(x)
     else:
-        return x
+        # For any other type, try to convert or return None
+        try:
+            if hasattr(x, '__dict__'):
+                return format_value(class_to_dict(x))
+        except:
+            pass
+        return None  # Can't serialize, return None
 
 
 def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
@@ -247,23 +277,69 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         
         # Ensure params is a dict (not None or missing)
         # Params should come from obs_cfg.params, not term_cfg
+        # Need to recursively convert config objects (like SceneEntityCfg) to dicts
+        def convert_params_to_dict(params_obj):
+            """Recursively convert params object to dict, handling config objects."""
+            if params_obj is None:
+                return {}
+            
+            # Handle slice objects (can't be serialized) - skip them
+            if isinstance(params_obj, slice):
+                return None  # Slice objects can't be serialized, C++ doesn't need them
+            
+            # If it's already a dict, recursively process it and filter out None values
+            if isinstance(params_obj, dict):
+                result = {}
+                for k, v in params_obj.items():
+                    converted_v = convert_params_to_dict(v)
+                    # Skip None values and slices
+                    if converted_v is not None and not isinstance(converted_v, slice):
+                        result[k] = converted_v
+                return result
+            
+            # If it's a config object with to_dict method, use it
+            if hasattr(params_obj, 'to_dict'):
+                return convert_params_to_dict(params_obj.to_dict())
+            
+            # If it's a list/tuple, recursively process elements
+            if isinstance(params_obj, (list, tuple)):
+                return [convert_params_to_dict(item) for item in params_obj if not isinstance(item, slice)]
+            
+            # For primitive types or objects we can't convert, try class_to_dict
+            try:
+                converted = class_to_dict(params_obj)
+                if isinstance(converted, dict):
+                    # Filter out slice objects and other non-serializable items
+                    filtered = {}
+                    for k, v in converted.items():
+                        if not isinstance(v, slice):
+                            converted_v = convert_params_to_dict(v)
+                            if converted_v is not None:
+                                filtered[k] = converted_v
+                    return filtered if filtered else convert_params_to_dict(converted)
+            except:
+                pass
+            
+            # Fallback: return as-is if it's a primitive type
+            if isinstance(params_obj, (str, int, float, bool, type(None))):
+                return params_obj
+            
+            # Last resort: try to convert to dict
+            try:
+                if hasattr(params_obj, '__iter__') and not isinstance(params_obj, str):
+                    return dict((k, convert_params_to_dict(v)) for k, v in params_obj.items() if not isinstance(v, slice))
+            except:
+                pass
+            
+            # If all else fails, return empty dict
+            return {}
+        
         if hasattr(obs_cfg, 'params') and obs_cfg.params is not None:
-            # Convert params to dict if it's a config object
-            if hasattr(obs_cfg.params, 'to_dict'):
-                term_cfg["params"] = obs_cfg.params.to_dict()
-            elif isinstance(obs_cfg.params, dict):
-                term_cfg["params"] = obs_cfg.params.copy()
-            else:
-                # Try to convert to dict
-                try:
-                    term_cfg["params"] = dict(obs_cfg.params) if hasattr(obs_cfg.params, '__iter__') else {}
-                except:
-                    term_cfg["params"] = {}
+            term_cfg["params"] = convert_params_to_dict(obs_cfg.params)
         elif "params" not in term_cfg or term_cfg.get("params") is None:
             term_cfg["params"] = {}
         elif not isinstance(term_cfg["params"], dict):
-            # Convert to dict if it's not already
-            term_cfg["params"] = dict(term_cfg["params"]) if hasattr(term_cfg["params"], '__iter__') else {}
+            term_cfg["params"] = convert_params_to_dict(term_cfg["params"])
         
         # Ensure params is always a dict (never None)
         if term_cfg.get("params") is None:
@@ -275,11 +351,21 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             params_dict = term_cfg["params"]
             if isinstance(params_dict, dict) and "asset_cfg" in params_dict:
                 asset_cfg_dict = params_dict["asset_cfg"]
-                if isinstance(asset_cfg_dict, dict) and "body_names" in asset_cfg_dict:
-                    # Ensure body_names is a list
-                    body_names = asset_cfg_dict["body_names"]
+                if isinstance(asset_cfg_dict, dict):
+                    # Get body_names, ensuring it's a list
+                    body_names = asset_cfg_dict.get("body_names", [])
                     if isinstance(body_names, (list, tuple)):
-                        params_dict["asset_cfg"]["body_names"] = list(body_names)
+                        body_names = list(body_names)
+                    elif body_names is None:
+                        body_names = []
+                    
+                    # Remove non-serializable fields like slice objects, body_ids (computed), etc.
+                    # Keep only what C++ needs: name and body_names
+                    clean_asset_cfg = {
+                        "name": asset_cfg_dict.get("name", "robot"),
+                        "body_names": body_names
+                    }
+                    params_dict["asset_cfg"] = clean_asset_cfg
                     # Preserve the structure for C++ parsing
         
         # Ensure clip is None (not empty list) if not set
