@@ -47,12 +47,15 @@ public:
             
             // Use iterator-based parsing (more robust with multi-line YAML arrays)
             robot->data.joint_ids_map.clear();
-            for (YAML::const_iterator it = joint_ids_node.begin(); it != joint_ids_node.end(); ++it) {
-                if (it->IsScalar()) {
+            size_t idx = 0;
+            for (YAML::const_iterator it = joint_ids_node.begin(); it != joint_ids_node.end(); ++it, ++idx) {
+                try {
+                    // Try direct conversion - yaml-cpp handles scalar conversion automatically
                     int val = it->as<int>();
                     robot->data.joint_ids_map.push_back(static_cast<float>(val));
-                } else {
-                    throw std::runtime_error("joint_ids_map contains non-scalar element");
+                } catch (const YAML::TypedBadConversion<int>& e) {
+                    spdlog::error("Failed to convert joint_ids_map[{}] to int. Node type: {}", idx, it->Type());
+                    throw std::runtime_error("joint_ids_map contains invalid element at index " + std::to_string(idx));
                 }
             }
             spdlog::debug("Parsed {} joint IDs", robot->data.joint_ids_map.size());
