@@ -49,13 +49,15 @@ public:
             robot->data.joint_ids_map.clear();
             size_t idx = 0;
             for (YAML::const_iterator it = joint_ids_node.begin(); it != joint_ids_node.end(); ++it, ++idx) {
+                // Get string representation first
+                std::string str_val = it->as<std::string>();
+                // Parse as int from string
                 try {
-                    // Try direct conversion - yaml-cpp handles scalar conversion automatically
-                    int val = it->as<int>();
+                    int val = std::stoi(str_val);
                     robot->data.joint_ids_map.push_back(static_cast<float>(val));
-                } catch (const YAML::TypedBadConversion<int>& e) {
-                    spdlog::error("Failed to convert joint_ids_map[{}] to int. Node type: {}", idx, it->Type());
-                    throw std::runtime_error("joint_ids_map contains invalid element at index " + std::to_string(idx));
+                } catch (const std::exception& e) {
+                    spdlog::error("Failed to convert joint_ids_map[{}] '{}' to int: {}", idx, str_val, e.what());
+                    throw;
                 }
             }
             spdlog::debug("Parsed {} joint IDs", robot->data.joint_ids_map.size());
