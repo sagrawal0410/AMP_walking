@@ -388,8 +388,15 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         cfg["observations"][deploy_obs_name] = term_cfg
         obs_order.append(deploy_obs_name)
     
-    # Store observation order explicitly (critical for AMP policies)
-    cfg["obs_order"] = obs_order
+    # Set use_gym_history and obs_order for AMP policies
+    # Note: ObservationManager receives cfg["observations"], so these must be inside observations dict
+    if has_amp_terms:
+        # Set use_gym_history to false (concatenated history, not interleaved)
+        # This ensures history is concatenated per term: [term1_h0, term1_h1, ..., term1_h4, term2_h0, ...]
+        # Instead of interleaved: [term1_h0, term2_h0, ..., term1_h1, term2_h1, ...]
+        cfg["observations"]["use_gym_history"] = False
+        # Store observation order explicitly (critical for AMP policies)
+        cfg["observations"]["obs_order"] = obs_order
 
     # --- save config file ---
     filename = os.path.join(log_dir, "params", "deploy.yaml")
