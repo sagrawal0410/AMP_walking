@@ -170,7 +170,7 @@ protected:
                     terms.push_back(term_map[term_name]);
                 } else {
                     spdlog::warn("Observation term '{}' in obs_order not found in observations config", term_name);
-                }
+        }
             }
             // Add any remaining terms not in obs_order (shouldn't happen, but be safe)
             for(const auto& pair : term_map) {

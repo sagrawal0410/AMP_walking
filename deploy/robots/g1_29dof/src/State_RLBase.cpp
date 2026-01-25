@@ -110,10 +110,10 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
     }
 
     try {
-        env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
+    env = std::make_unique<isaaclab::ManagerBasedRLEnv>(
             deploy_cfg,
-            std::make_shared<unitree::BaseArticulation<LowState_t::SharedPtr>>(FSMState::lowstate)
-        );
+        std::make_shared<unitree::BaseArticulation<LowState_t::SharedPtr>>(FSMState::lowstate)
+    );
     } catch (const std::exception& e) {
         spdlog::error("Failed to create ManagerBasedRLEnv: {}", e.what());
         throw;
