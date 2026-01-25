@@ -27,7 +27,12 @@ public:
     {
         // Parse configuration
         this->step_dt = cfg["step_dt"].as<float>();
-        robot->data.joint_ids_map = cfg["joint_ids_map"].as<std::vector<float>>();
+        // Parse joint_ids_map as integers first (more robust with YAML), then convert to float
+        auto joint_ids_int = cfg["joint_ids_map"].as<std::vector<int>>();
+        robot->data.joint_ids_map.resize(joint_ids_int.size());
+        for(size_t i = 0; i < joint_ids_int.size(); i++) {
+            robot->data.joint_ids_map[i] = static_cast<float>(joint_ids_int[i]);
+        }
         robot->data.joint_pos.resize(robot->data.joint_ids_map.size());
         robot->data.joint_vel.resize(robot->data.joint_ids_map.size());
 
