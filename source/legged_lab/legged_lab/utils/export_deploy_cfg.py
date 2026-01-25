@@ -169,15 +169,26 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         "key_body_pos_b",  # AMP-specific
     }
     
+    # Check if this is an AMP policy by looking for AMP-specific function names
+    # We need to check function names, not observation names, because the mapping happens later
+    has_amp_terms = False
+    for obs_name, obs_cfg in zip(env.observation_manager.active_terms["policy"], 
+                                  env.observation_manager._group_obs_term_cfgs["policy"]):
+        func_name = obs_cfg.func.__name__ if hasattr(obs_cfg.func, '__name__') else str(obs_cfg.func)
+        if func_name in ["root_local_rot_tan_norm", "key_body_pos_b"]:
+            has_amp_terms = True
+            break
+    
     # Map from training observation names to deploy observation names
     # This is needed because training uses different names than deploy function names
     obs_name_mapping = {
         "actions": "last_action",  # training uses "actions", deploy uses "last_action"
-        # Note: joint_vel/joint_pos mapping depends on function name:
-        # - AMP: uses joint_vel/joint_pos (absolute)
-        # - Velocity: uses joint_vel_rel/joint_pos_rel (relative)
-        # We check function name to determine correct mapping
     }
+    
+    # For AMP policies, map relative joint terms to absolute terms
+    if has_amp_terms:
+        obs_name_mapping["joint_pos_rel"] = "joint_pos"
+        obs_name_mapping["joint_vel_rel"] = "joint_vel"
     
     obs_names = env.observation_manager.active_terms["policy"]
     obs_cfgs = env.observation_manager._group_obs_term_cfgs["policy"]
@@ -208,11 +219,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         # Special case: generated_commands -> keyboard_velocity_commands for AMP, velocity_commands for velocity
         elif func_name == "generated_commands":
             # For AMP policies, always use keyboard_velocity_commands
-            # Check if this is an AMP env by looking for AMP-specific terms
-            has_amp_terms = any(
-                name in ["root_local_rot_tan_norm", "key_body_pos_b"] 
-                for name in env.observation_manager.active_terms["policy"]
-            )
+            # Use the has_amp_terms variable already computed above
             if has_amp_terms and "keyboard_velocity_commands" in registered_observations:
                 deploy_obs_name = "keyboard_velocity_commands"
             elif "velocity_commands" in registered_observations:
