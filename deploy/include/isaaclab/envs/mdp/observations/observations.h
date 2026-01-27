@@ -507,7 +507,9 @@ REGISTER_OBSERVATION(key_body_pos_b)
     std::vector<float> obs(num_key_bodies * 3);  // 3D positions
     
     // Get joint positions (already in SDK order from robot data)
-    const auto& joint_pos = asset->data.joint_pos;
+    // Convert Eigen vector to std::vector
+    const auto& joint_pos_eigen = asset->data.joint_pos;
+    std::vector<float> joint_pos(joint_pos_eigen.data(), joint_pos_eigen.data() + joint_pos_eigen.size());
     
     // Compute FK for each key body
     for (size_t i = 0; i < num_key_bodies; ++i) {
