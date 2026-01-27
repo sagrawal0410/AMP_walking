@@ -8,7 +8,7 @@ from isaaclab.utils import class_to_dict
 from isaaclab.utils.string import resolve_matching_names
 
 
-def format_value(x, debug_key=None):
+def format_value(x):
     """Format values for YAML output, converting tuples to lists and handling special types."""
     # Handle None first
     if x is None:
@@ -18,88 +18,43 @@ def format_value(x, debug_key=None):
     if isinstance(x, slice):
         return None
     
-    # Handle basic Python types FIRST (before numpy checks)
-    if isinstance(x, bool):  # Must be before int check since bool is subclass of int
-        return x
-    if isinstance(x, int):
-        return int(x)  # Ensure it's a Python int
-    if isinstance(x, float):
-        return float(f"{x:.3g}")
-    if isinstance(x, str):
-        return x
-    
-    # Handle numpy scalar types (check these BEFORE array/collection checks)
-    # Use np.generic as base class for all numpy scalars
-    if isinstance(x, (np.integer, np.int_, np.intc, np.int8, np.int16, np.int32, np.int64)):
-        return int(x)
-    if isinstance(x, (np.floating, np.float_, np.float16, np.float32, np.float64)):
-        return float(x)
-    if isinstance(x, (np.bool_, np.bool8)):
-        return bool(x)
-    
-    # Handle numpy arrays
-    if isinstance(x, np.ndarray):
-        return format_value(x.tolist(), debug_key)
-    
-    # Handle collections (lists, tuples)
-    if isinstance(x, (tuple, list)):
-        result = []
-        for i, item in enumerate(x):
-            formatted = format_value(item, f"{debug_key}[{i}]" if debug_key else f"[{i}]")
-            if formatted is not None:
-                result.append(formatted)
-        return result
-    
-    # Handle dicts
-    if isinstance(x, dict):
-        result = {}
-        for k, v in x.items():
-            formatted = format_value(v, k)
-            if formatted is not None:
-                result[k] = formatted
-        return result
-    
     # Handle config objects (like SceneEntityCfg) that need to be converted to dict first
-    if hasattr(x, 'to_dict'):
+    if hasattr(x, 'to_dict') and not isinstance(x, (dict, list, tuple, str, int, float, bool, np.ndarray, np.integer, np.floating)):
         try:
-            return format_value(x.to_dict(), debug_key)
-        except Exception:
+            return format_value(x.to_dict())
+        except:
             pass
     
     # Try class_to_dict for objects that can't be serialized
     try:
-        converted = class_to_dict(x)
-        if isinstance(converted, dict) and converted != x:
-            return format_value(converted, debug_key)
-    except Exception:
+        if not isinstance(x, (dict, list, tuple, str, int, float, bool, np.ndarray, np.integer, np.floating)):
+            converted = class_to_dict(x)
+            if converted != x:  # Only use if conversion actually changed something
+                return format_value(converted)
+    except:
         pass
     
-    # For any other type, try to convert or return None
-    try:
-        if hasattr(x, '__dict__'):
-            return format_value(class_to_dict(x), debug_key)
-    except Exception:
-        pass
-    
-    # Last resort: try to convert to basic types
-    try:
-        # Try int conversion
+    if isinstance(x, float):
+        return float(f"{x:.3g}")
+    elif isinstance(x, (tuple, list)):
+        # Convert tuples to lists to avoid !!python/tuple tags in YAML
+        return [format_value(i) for i in x]
+    elif isinstance(x, dict):
+        return {k: format_value(v) for k, v in x.items()}
+    elif isinstance(x, np.ndarray):
+        return format_value(x.tolist())
+    elif isinstance(x, np.integer):
         return int(x)
-    except (ValueError, TypeError):
-        pass
-    try:
-        # Try float conversion
+    elif isinstance(x, np.floating):
         return float(x)
-    except (ValueError, TypeError):
-        pass
-    try:
-        # Try string conversion
-        return str(x)
-    except Exception:
-        pass
-    
-    print(f"[WARNING] format_value: Cannot serialize {type(x).__name__} for key '{debug_key}': {repr(x)[:100]}")
-    return None
+    else:
+        # For any other type, try to convert or return None
+        try:
+            if hasattr(x, '__dict__'):
+                return format_value(class_to_dict(x))
+        except:
+            pass
+        return None  # Can't serialize, return None
 
 
 def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
@@ -108,9 +63,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     joint_ids_map, _ = resolve_matching_names(asset.data.joint_names, joint_sdk_names, preserve_order=True)
 
     cfg = {}  # noqa: SIM904
-    # Ensure joint_ids_map is a list of Python ints (not numpy types)
-    cfg["joint_ids_map"] = [int(x) for x in joint_ids_map]
-    print(f"[DEBUG] joint_ids_map: {cfg['joint_ids_map'][:5]}... (len={len(cfg['joint_ids_map'])})")
+    cfg["joint_ids_map"] = joint_ids_map
     cfg["step_dt"] = env.cfg.sim.dt * env.cfg.decimation
     stiffness = np.zeros(len(joint_sdk_names))
     stiffness[joint_ids_map] = asset.data.default_joint_stiffness[0].detach().cpu().numpy().tolist()
@@ -320,23 +273,14 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
                 # Fallback: try direct conversion
                 term_cfg.clip = list(term_cfg.clip) if hasattr(term_cfg.clip, '__iter__') else None
         
-        # clean cfg - convert to dict first
-        term_cfg_dict = term_cfg.to_dict()
-        for key in ["func", "modifiers", "noise", "flatten_history_dim"]:
-            if key in term_cfg_dict:
-                del term_cfg_dict[key]
-        
-        # Ensure history_length is a valid integer AFTER converting to dict
-        # Default to 5 for AMP policies, 1 otherwise
-        history_len = term_cfg_dict.get("history_length")
-        if history_len is None or history_len == 0:
-            # Use 5 for AMP policies (with history), 1 for velocity policies
-            term_cfg_dict["history_length"] = 5 if has_amp_terms else 1
-        else:
-            term_cfg_dict["history_length"] = int(history_len)
-        
-        # Now use term_cfg_dict instead of term_cfg
-        term_cfg = term_cfg_dict
+        if term_cfg.history_length == 0:
+            term_cfg.history_length = 1
+
+        # clean cfg
+        term_cfg = term_cfg.to_dict()
+        for _ in ["func", "modifiers", "noise", "flatten_history_dim"]:
+            if _ in term_cfg:
+                del term_cfg[_]
         
         # Ensure params is a dict (not None or missing)
         # Params should come from obs_cfg.params, not term_cfg
@@ -415,32 +359,21 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             if isinstance(params_dict, dict) and "asset_cfg" in params_dict:
                 asset_cfg_dict = params_dict["asset_cfg"]
                 if isinstance(asset_cfg_dict, dict):
-                    # Get body_names, ensuring it's a list of strings
+                    # Get body_names, ensuring it's a list
                     body_names = asset_cfg_dict.get("body_names", [])
                     if isinstance(body_names, (list, tuple)):
-                        # Filter out None values and ensure strings
-                        body_names = [str(name) for name in body_names if name is not None]
+                        body_names = list(body_names)
                     elif body_names is None:
                         body_names = []
-                    
-                    # If still empty, use default G1 key body names
-                    if not body_names:
-                        body_names = [
-                            "left_ankle_roll_link",
-                            "right_ankle_roll_link",
-                            "left_wrist_yaw_link",
-                            "right_wrist_yaw_link",
-                            "left_shoulder_roll_link",
-                            "right_shoulder_roll_link",
-                        ]
                     
                     # Remove non-serializable fields like slice objects, body_ids (computed), etc.
                     # Keep only what C++ needs: name and body_names
                     clean_asset_cfg = {
-                        "name": "robot",
+                        "name": asset_cfg_dict.get("name", "robot"),
                         "body_names": body_names
                     }
                     params_dict["asset_cfg"] = clean_asset_cfg
+                    # Preserve the structure for C++ parsing
         
         # Ensure clip is None (not empty list) if not set
         if "clip" in term_cfg:
@@ -455,11 +388,6 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         cfg["observations"][deploy_obs_name] = term_cfg
         obs_order.append(deploy_obs_name)
     
-    # Debug: Print observation order before saving
-    print(f"[DEBUG] has_amp_terms: {has_amp_terms}")
-    print(f"[DEBUG] obs_order: {obs_order}")
-    print(f"[DEBUG] observations keys: {list(cfg['observations'].keys())}")
-    
     # Set use_gym_history and obs_order for AMP policies
     # Note: ObservationManager receives cfg["observations"], so these must be inside observations dict
     if has_amp_terms:
@@ -468,7 +396,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         # Instead of interleaved: [term1_h0, term2_h0, ..., term1_h1, term2_h1, ...]
         cfg["observations"]["use_gym_history"] = False
         # Store observation order explicitly (critical for AMP policies)
-        cfg["observations"]["obs_order"] = list(obs_order)  # Ensure it's a new list
+        cfg["observations"]["obs_order"] = obs_order
 
     # --- save config file ---
     filename = os.path.join(log_dir, "params", "deploy.yaml")
@@ -477,62 +405,29 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     if not isinstance(cfg, dict):
         cfg = class_to_dict(cfg)
     
-    # Debug: print before format_value
-    print(f"[DEBUG] BEFORE format_value:")
-    print(f"  joint_ids_map type: {type(cfg.get('joint_ids_map'))}")
-    if cfg.get('joint_ids_map'):
-        print(f"  joint_ids_map[0] type: {type(cfg['joint_ids_map'][0])}, value: {cfg['joint_ids_map'][0]}")
-    obs_cfg = cfg.get('observations', {})
-    if 'base_ang_vel' in obs_cfg:
-        print(f"  base_ang_vel history_length: {obs_cfg['base_ang_vel'].get('history_length')}")
-    
     # Format all values to ensure proper YAML serialization
     # This converts tuples to lists, numpy types to Python types, etc.
     cfg = format_value(cfg)
     
-    # Debug: print after format_value
-    print(f"[DEBUG] AFTER format_value:")
-    print(f"  joint_ids_map: {cfg.get('joint_ids_map', [])[:5] if cfg.get('joint_ids_map') else 'None'}")
-    obs_cfg = cfg.get('observations', {})
-    print(f"  observations keys: {list(obs_cfg.keys())}")
-    if 'base_ang_vel' in obs_cfg:
-        print(f"  base_ang_vel: {obs_cfg['base_ang_vel']}")
-    
-    # Final pass: ensure no Python-specific types remain (but keep None filtering)
+    # Final pass: ensure no Python-specific types remain
     def clean_yaml_types(obj):
         """Recursively clean Python-specific types for YAML."""
-        if obj is None:
-            return None
         if isinstance(obj, dict):
-            result = {}
-            for k, v in obj.items():
-                cleaned = clean_yaml_types(v)
-                if cleaned is not None:  # Filter out None values
-                    result[k] = cleaned
-            return result
+            return {k: clean_yaml_types(v) for k, v in obj.items()}
         elif isinstance(obj, (list, tuple)):
-            result = []
-            for item in obj:
-                cleaned = clean_yaml_types(item)
-                if cleaned is not None:  # Filter out None values
-                    result.append(cleaned)
-            return result
+            return [clean_yaml_types(item) for item in obj]
         elif isinstance(obj, np.integer):
             return int(obj)
         elif isinstance(obj, np.floating):
             return float(obj)
         elif isinstance(obj, np.ndarray):
-            return clean_yaml_types(obj.tolist())
+            return obj.tolist()
         elif isinstance(obj, (np.bool_, bool)):
             return bool(obj)
         else:
             return obj
     
     cfg = clean_yaml_types(cfg)
-    
-    # Debug: print after clean_yaml_types
-    print(f"[DEBUG] AFTER clean_yaml_types:")
-    print(f"  joint_ids_map: {cfg.get('joint_ids_map', [])[:5] if cfg.get('joint_ids_map') else 'Empty'}")
     
     # Use SafeDumper to avoid Python-specific tags like !!python/tuple
     # and ensure clean YAML output

@@ -117,12 +117,8 @@ protected:
         
         // Check if obs_order is specified in the parent config (for AMP policies)
         std::vector<std::string> obs_order;
-        if(this->cfg["obs_order"].IsDefined() && !this->cfg["obs_order"].IsNull() && this->cfg["obs_order"].IsSequence()) {
-            for(const auto& node : this->cfg["obs_order"]) {
-                if(!node.IsNull() && node.IsScalar()) {
-                    obs_order.push_back(node.as<std::string>());
-                }
-            }
+        if(this->cfg["obs_order"].IsDefined()) {
+            obs_order = this->cfg["obs_order"].as<std::vector<std::string>>();
         }
         
         // Build a map of term configs first
@@ -132,29 +128,11 @@ protected:
         {
             std::string key = it->first.as<std::string>();
             if(key == "scale_first") {
-                try {
-                    scale_first = it->second.as<bool>();
-                } catch (const std::exception& e) {
-                    spdlog::warn("Failed to parse scale_first, using default: false");
-                    scale_first = false;
-                }
+                scale_first = it->second.as<bool>();
                 continue;
             }
             if(key == "use_gym_history") { // set only once
-                // Skip if null or not defined
-                if(it->second.IsNull() || !it->second.IsDefined()) {
-                    use_gym_history = false;
-                    continue;
-                }
-                try {
-                    use_gym_history = it->second.as<bool>();
-                } catch (const std::exception& e) {
-                    spdlog::warn("Failed to parse use_gym_history, using default false: {}", e.what());
-                    use_gym_history = false;
-                }
-                continue;
-            }
-            if(key == "obs_order") { // skip - already parsed above
+                use_gym_history = it->second.as<bool>();
                 continue;
             }
 
@@ -163,12 +141,7 @@ protected:
             ObservationTermCfg term_cfg;
             term_cfg.params = term_yaml_cfg["params"];
             term_cfg.scale_first = scale_first;
-            // Parse history_length, default to 1 if null or missing
-            if(term_yaml_cfg["history_length"].IsDefined() && !term_yaml_cfg["history_length"].IsNull()) {
-                term_cfg.history_length = term_yaml_cfg["history_length"].as<int>(1);
-            } else {
-                term_cfg.history_length = 1;
-            }
+            term_cfg.history_length = term_yaml_cfg["history_length"].as<int>(1);
 
             auto term_name = key;
             if(observations_map()[term_name] == nullptr) {
