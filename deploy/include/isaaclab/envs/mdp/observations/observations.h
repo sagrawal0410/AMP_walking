@@ -213,14 +213,19 @@ REGISTER_OBSERVATION(key_body_pos_b)
     
     auto & asset = env->robot;
     
-    // Get body names from params
+    // Get body names from params - handle null values
     std::vector<std::string> body_names;
     try {
-        if(params["asset_cfg"]["body_names"].IsDefined()) {
-            body_names = params["asset_cfg"]["body_names"].as<std::vector<std::string>>();
+        auto body_names_node = params["asset_cfg"]["body_names"];
+        if(body_names_node.IsDefined() && !body_names_node.IsNull() && body_names_node.IsSequence()) {
+            for(const auto& node : body_names_node) {
+                if(!node.IsNull() && node.IsScalar()) {
+                    body_names.push_back(node.as<std::string>());
+                }
+            }
         }
     } catch(const std::exception& e) {
-        spdlog::warn("key_body_pos_b: Failed to parse body_names from params, using default");
+        spdlog::warn("key_body_pos_b: Failed to parse body_names from params: {}", e.what());
     }
     
     // Default key body names for G1 (must match g1_amp_env_cfg.py)
@@ -246,8 +251,12 @@ REGISTER_OBSERVATION(key_body_pos_b)
     //  3. Transform to base frame: p_body_base = R_base_world^T * (p_body_world - p_base_world)
     //  4. For real robot, p_base_world = 0, R_base_world = I, so p_body_base = FK(base->key_link).position
     
-    spdlog::warn("key_body_pos_b: Returning zeros - FK not implemented. "
-                 "This observation will be incorrect until FK is implemented.");
+    static bool warned = false;
+    if(!warned) {
+        spdlog::warn("key_body_pos_b: Returning zeros - FK not implemented. "
+                     "This observation will be incorrect until FK is implemented.");
+        warned = true;
+    }
     
     // Fill with zeros for now
     std::fill(obs.begin(), obs.end(), 0.0f);

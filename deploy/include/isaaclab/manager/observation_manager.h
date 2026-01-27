@@ -117,8 +117,12 @@ protected:
         
         // Check if obs_order is specified in the parent config (for AMP policies)
         std::vector<std::string> obs_order;
-        if(this->cfg["obs_order"].IsDefined()) {
-            obs_order = this->cfg["obs_order"].as<std::vector<std::string>>();
+        if(this->cfg["obs_order"].IsDefined() && !this->cfg["obs_order"].IsNull() && this->cfg["obs_order"].IsSequence()) {
+            for(const auto& node : this->cfg["obs_order"]) {
+                if(!node.IsNull() && node.IsScalar()) {
+                    obs_order.push_back(node.as<std::string>());
+                }
+            }
         }
         
         // Build a map of term configs first
@@ -150,13 +154,21 @@ protected:
                 }
                 continue;
             }
+            if(key == "obs_order") { // skip - already parsed above
+                continue;
+            }
 
             /*** observation terms ***/
             const auto term_yaml_cfg = it->second;
             ObservationTermCfg term_cfg;
             term_cfg.params = term_yaml_cfg["params"];
             term_cfg.scale_first = scale_first;
-            term_cfg.history_length = term_yaml_cfg["history_length"].as<int>(1);
+            // Parse history_length, default to 1 if null or missing
+            if(term_yaml_cfg["history_length"].IsDefined() && !term_yaml_cfg["history_length"].IsNull()) {
+                term_cfg.history_length = term_yaml_cfg["history_length"].as<int>(1);
+            } else {
+                term_cfg.history_length = 1;
+            }
 
             auto term_name = key;
             if(observations_map()[term_name] == nullptr) {

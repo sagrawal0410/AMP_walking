@@ -18,8 +18,43 @@ def format_value(x):
     if isinstance(x, slice):
         return None
     
+    # Handle basic types first - strings, ints, bools should pass through
+    if isinstance(x, str):
+        return x
+    if isinstance(x, bool):
+        return x
+    if isinstance(x, int):
+        return x
+    if isinstance(x, float):
+        return float(f"{x:.3g}")
+    
+    # Handle numpy types
+    if isinstance(x, np.ndarray):
+        return format_value(x.tolist())
+    if isinstance(x, np.integer):
+        return int(x)
+    if isinstance(x, np.floating):
+        return float(x)
+    if isinstance(x, np.bool_):
+        return bool(x)
+    
+    # Handle collections
+    if isinstance(x, (tuple, list)):
+        # Convert tuples to lists to avoid !!python/tuple tags in YAML
+        # Filter out None values from lists
+        result = [format_value(i) for i in x]
+        return [item for item in result if item is not None]
+    if isinstance(x, dict):
+        # Filter out None values from dicts
+        result = {}
+        for k, v in x.items():
+            formatted = format_value(v)
+            if formatted is not None:
+                result[k] = formatted
+        return result
+    
     # Handle config objects (like SceneEntityCfg) that need to be converted to dict first
-    if hasattr(x, 'to_dict') and not isinstance(x, (dict, list, tuple, str, int, float, bool, np.ndarray, np.integer, np.floating)):
+    if hasattr(x, 'to_dict'):
         try:
             return format_value(x.to_dict())
         except:
@@ -27,34 +62,19 @@ def format_value(x):
     
     # Try class_to_dict for objects that can't be serialized
     try:
-        if not isinstance(x, (dict, list, tuple, str, int, float, bool, np.ndarray, np.integer, np.floating)):
-            converted = class_to_dict(x)
-            if converted != x:  # Only use if conversion actually changed something
-                return format_value(converted)
+        converted = class_to_dict(x)
+        if converted != x:  # Only use if conversion actually changed something
+            return format_value(converted)
     except:
         pass
     
-    if isinstance(x, float):
-        return float(f"{x:.3g}")
-    elif isinstance(x, (tuple, list)):
-        # Convert tuples to lists to avoid !!python/tuple tags in YAML
-        return [format_value(i) for i in x]
-    elif isinstance(x, dict):
-        return {k: format_value(v) for k, v in x.items()}
-    elif isinstance(x, np.ndarray):
-        return format_value(x.tolist())
-    elif isinstance(x, np.integer):
-        return int(x)
-    elif isinstance(x, np.floating):
-        return float(x)
-    else:
-        # For any other type, try to convert or return None
-        try:
-            if hasattr(x, '__dict__'):
-                return format_value(class_to_dict(x))
-        except:
-            pass
-        return None  # Can't serialize, return None
+    # For any other type, try to convert or return None
+    try:
+        if hasattr(x, '__dict__'):
+            return format_value(class_to_dict(x))
+    except:
+        pass
+    return None  # Can't serialize, return None
 
 
 def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
@@ -273,7 +293,8 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
                 # Fallback: try direct conversion
                 term_cfg.clip = list(term_cfg.clip) if hasattr(term_cfg.clip, '__iter__') else None
         
-        if term_cfg.history_length == 0:
+        # Ensure history_length is a valid integer (default to 1 if None or 0)
+        if term_cfg.history_length is None or term_cfg.history_length == 0:
             term_cfg.history_length = 1
 
         # clean cfg
@@ -359,21 +380,32 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             if isinstance(params_dict, dict) and "asset_cfg" in params_dict:
                 asset_cfg_dict = params_dict["asset_cfg"]
                 if isinstance(asset_cfg_dict, dict):
-                    # Get body_names, ensuring it's a list
+                    # Get body_names, ensuring it's a list of strings
                     body_names = asset_cfg_dict.get("body_names", [])
                     if isinstance(body_names, (list, tuple)):
-                        body_names = list(body_names)
+                        # Filter out None values and ensure strings
+                        body_names = [str(name) for name in body_names if name is not None]
                     elif body_names is None:
                         body_names = []
+                    
+                    # If still empty, use default G1 key body names
+                    if not body_names:
+                        body_names = [
+                            "left_ankle_roll_link",
+                            "right_ankle_roll_link",
+                            "left_wrist_yaw_link",
+                            "right_wrist_yaw_link",
+                            "left_shoulder_roll_link",
+                            "right_shoulder_roll_link",
+                        ]
                     
                     # Remove non-serializable fields like slice objects, body_ids (computed), etc.
                     # Keep only what C++ needs: name and body_names
                     clean_asset_cfg = {
-                        "name": asset_cfg_dict.get("name", "robot"),
+                        "name": "robot",
                         "body_names": body_names
                     }
                     params_dict["asset_cfg"] = clean_asset_cfg
-                    # Preserve the structure for C++ parsing
         
         # Ensure clip is None (not empty list) if not set
         if "clip" in term_cfg:
