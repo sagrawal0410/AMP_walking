@@ -128,11 +128,26 @@ protected:
         {
             std::string key = it->first.as<std::string>();
             if(key == "scale_first") {
-                scale_first = it->second.as<bool>();
+                try {
+                    scale_first = it->second.as<bool>();
+                } catch (const std::exception& e) {
+                    spdlog::warn("Failed to parse scale_first, using default: false");
+                    scale_first = false;
+                }
                 continue;
             }
             if(key == "use_gym_history") { // set only once
-                use_gym_history = it->second.as<bool>();
+                // Skip if null or not defined
+                if(it->second.IsNull() || !it->second.IsDefined()) {
+                    use_gym_history = false;
+                    continue;
+                }
+                try {
+                    use_gym_history = it->second.as<bool>();
+                } catch (const std::exception& e) {
+                    spdlog::warn("Failed to parse use_gym_history, using default false: {}", e.what());
+                    use_gym_history = false;
+                }
                 continue;
             }
 
