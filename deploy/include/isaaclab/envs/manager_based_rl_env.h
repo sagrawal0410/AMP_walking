@@ -104,9 +104,24 @@ public:
 
         robot->update();
 
-        // load managers
-        action_manager = std::make_unique<ActionManager>(cfg["actions"], this);
-        observation_manager = std::make_unique<ObservationManager>(cfg["observations"], this);
+        // load managers with detailed error handling
+        try {
+            spdlog::debug("Creating ActionManager...");
+            action_manager = std::make_unique<ActionManager>(cfg["actions"], this);
+            spdlog::debug("ActionManager created successfully");
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to create ActionManager: {}", e.what());
+            throw;
+        }
+        
+        try {
+            spdlog::debug("Creating ObservationManager...");
+            observation_manager = std::make_unique<ObservationManager>(cfg["observations"], this);
+            spdlog::debug("ObservationManager created successfully");
+        } catch (const std::exception& e) {
+            spdlog::error("Failed to create ObservationManager: {}", e.what());
+            throw;
+        }
     }
 
     void reset()

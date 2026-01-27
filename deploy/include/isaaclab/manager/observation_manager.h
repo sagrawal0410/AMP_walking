@@ -97,14 +97,39 @@ public:
 protected:
     void _prapare_terms()
     {
-        // check whether have multiple input
-        bool only_one_input = this->cfg.begin()->second["params"].IsDefined(); // trick to check
+        // Parse use_gym_history and obs_order at this level first
+        if(this->cfg["use_gym_history"].IsDefined()) {
+            use_gym_history = this->cfg["use_gym_history"].as<bool>();
+        }
+        if(this->cfg["obs_order"].IsDefined()) {
+            obs_order_ = this->cfg["obs_order"].as<std::vector<std::string>>();
+        }
+        
+        // Check whether we have multiple groups or single group (observations directly)
+        // Find the first entry that is a map (skip use_gym_history, obs_order which are not maps)
+        bool only_one_input = false;
+        for(auto it = this->cfg.begin(); it != this->cfg.end(); ++it) {
+            std::string key = it->first.as<std::string>();
+            if(key == "use_gym_history" || key == "obs_order") {
+                continue;  // Skip these meta-fields
+            }
+            // Check if this is an observation term (has params field) or a group
+            if(it->second.IsMap() && it->second["params"].IsDefined()) {
+                only_one_input = true;
+            }
+            break;  // Only need to check the first real entry
+        }
+        
         if(only_one_input) {
             group_obs_term_cfgs_["obs"] = _prepare_group_terms(this->cfg); // default group name
         } else {
             for(auto group = this->cfg.begin(); group != this->cfg.end(); ++group)
             {
-                auto group_name = group->first.as<std::string>();
+                std::string group_name = group->first.as<std::string>();
+                // Skip meta-fields
+                if(group_name == "use_gym_history" || group_name == "obs_order") {
+                    continue;
+                }
                 group_obs_term_cfgs_[group_name] = _prepare_group_terms(group->second);
             }
         }
@@ -115,11 +140,7 @@ protected:
         std::vector<ObservationTermCfg> terms;
         bool scale_first = false; // isaaclab default: clip first
         
-        // Check if obs_order is specified in the parent config (for AMP policies)
-        std::vector<std::string> obs_order;
-        if(this->cfg["obs_order"].IsDefined()) {
-            obs_order = this->cfg["obs_order"].as<std::vector<std::string>>();
-        }
+        // Use obs_order_ parsed in _prapare_terms() (already available as member)
         
         // Build a map of term configs first
         std::map<std::string, ObservationTermCfg> term_map;
@@ -165,19 +186,19 @@ protected:
             term_map[term_name] = term_cfg;
         }
         
-        // Build terms list in obs_order if specified, otherwise use map order
-        if(!obs_order.empty()) {
-            // Use obs_order to preserve exact ordering
-            for(const auto& term_name : obs_order) {
+        // Build terms list in obs_order_ if specified, otherwise use map order
+        if(!obs_order_.empty()) {
+            // Use obs_order_ to preserve exact ordering
+            for(const auto& term_name : obs_order_) {
                 if(term_map.find(term_name) != term_map.end()) {
                     terms.push_back(term_map[term_name]);
                 } else {
                     spdlog::warn("Observation term '{}' in obs_order not found in observations config", term_name);
-        }
+                }
             }
-            // Add any remaining terms not in obs_order (shouldn't happen, but be safe)
+            // Add any remaining terms not in obs_order_ (shouldn't happen, but be safe)
             for(const auto& pair : term_map) {
-                if(std::find(obs_order.begin(), obs_order.end(), pair.first) == obs_order.end()) {
+                if(std::find(obs_order_.begin(), obs_order_.end(), pair.first) == obs_order_.end()) {
                     spdlog::warn("Observation term '{}' not in obs_order, appending at end", pair.first);
                     terms.push_back(pair.second);
                 }
@@ -197,6 +218,9 @@ protected:
 
     // whether to use gym type
     bool use_gym_history = false; // Manually set in the configuration file
+    
+    // observation order for AMP policies
+    std::vector<std::string> obs_order_;
 
 private:
     std::unordered_map<std::string, std::vector<ObservationTermCfg>> group_obs_term_cfgs_;
