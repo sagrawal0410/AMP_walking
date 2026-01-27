@@ -33,3 +33,7 @@ add_library(${PROJECT_NAME}_lib ${ADD_SRC_LIST})
 link_libraries(${PROJECT_NAME}_lib)
 
 add_executable(g1_ctrl main.cpp)
+
+# Test executable for FK diagnostics
+# Note: Compile manually: g++ -std=c++17 -I../../include -I/usr/include/eigen3 ../../../scripts/test_fk.cpp -o test_fk
+# Or add proper path resolution here

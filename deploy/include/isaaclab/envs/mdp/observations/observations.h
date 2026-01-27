@@ -451,10 +451,10 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     yaw_quat.normalize();
     
     // Remove yaw: root_quat_local = yaw_quat^{-1} * root_quat_w
-    //Eigen::Quaternionf root_quat_local = yaw_quat.conjugate() * root_quat_w;
+    Eigen::Quaternionf root_quat_local = yaw_quat.conjugate() * root_quat_w;
     
     // Convert to rotation matrix
-    Eigen::Matrix3f rotm_local = root_quat_w.toRotationMatrix();
+    Eigen::Matrix3f rotm_local = root_quat_local.toRotationMatrix();
     
     // Extract first column (tan) and third column (norm)
     // Python uses columns 0 and 2: tan_vec = root_rotm_local[:, 0], norm_vec = root_rotm_local[:, 2]
