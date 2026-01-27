@@ -6,7 +6,16 @@
 #include <vector>
 #include <iomanip>
 #include <cmath>
-#include "isaaclab/envs/mdp/observations/observations.h"
+#include <string>
+#include <eigen3/Eigen/Dense>
+#include <eigen3/Eigen/Geometry>
+
+// Forward declare - we'll copy just the FK function
+namespace isaaclab {
+namespace mdp {
+    Eigen::Vector3f computeKeyBodyPosition_G1(const std::string& body_name, const std::vector<float>& joint_pos);
+}
+}
 
 using namespace isaaclab::mdp;
 
