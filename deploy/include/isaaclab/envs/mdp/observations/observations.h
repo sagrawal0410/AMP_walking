@@ -451,7 +451,7 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     yaw_quat.normalize();
     
     // Remove yaw: root_quat_local = yaw_quat^{-1} * root_quat_w
-    Eigen::Quaternionf root_quat_local = yaw_quat.conjugate() * root_quat_w;
+    //Eigen::Quaternionf root_quat_local = yaw_quat.conjugate() * root_quat_w;
     
     // Convert to rotation matrix
     Eigen::Matrix3f rotm_local = root_quat_local.toRotationMatrix();

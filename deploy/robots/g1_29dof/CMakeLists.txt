@@ -6,6 +6,9 @@ set(CMAKE_CXX_STANDARD 17)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(yaml-cpp REQUIRED)
 
+# Optional: Pinocchio for FK (comment out if not installed)
+# find_package(pinocchio REQUIRED)
+
 include_directories(
   /usr/include/eigen3
   /usr/local/include/ddscxx # dds
@@ -13,6 +16,7 @@ include_directories(
   include
   ${PROJECT_SOURCE_DIR}/../../thirdparty/onnxruntime-linux-x64-1.22.0/include
   ${PROJECT_SOURCE_DIR}/../../include/
+  # ${PINOCCHIO_INCLUDE_DIRS}  # Uncomment if using Pinocchio
 )
 
 link_libraries(
