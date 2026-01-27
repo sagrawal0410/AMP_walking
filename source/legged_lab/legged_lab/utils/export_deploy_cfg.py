@@ -203,19 +203,27 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         func_name = obs_cfg.func.__name__ if hasattr(obs_cfg.func, '__name__') else str(obs_cfg.func)
         
         # Determine deploy observation name
-        # Priority: 1) function name if registered (most accurate), 2) explicit mapping, 3) original name if registered
+        # Priority: 1) explicit mapping (for AMP-specific mappings), 2) function name if registered, 3) original name if registered
         deploy_obs_name = None
         
-        # Check if function name is registered first (most accurate mapping)
-        # This handles cases where training name differs from function name
-        if func_name in registered_observations:
-            deploy_obs_name = func_name
-        # Check explicit mapping second (for actions -> last_action)
-        elif obs_name in obs_name_mapping:
+        # Check explicit mapping first (for actions -> last_action, and velocity_commands -> keyboard_velocity_commands for AMP)
+        if obs_name in obs_name_mapping:
             deploy_obs_name = obs_name_mapping[obs_name]
+        # Check if function name is registered (most accurate mapping)
+        # This handles cases where training name differs from function name
+        elif func_name in registered_observations:
+            # Special handling: if func_name is "velocity_commands" and this is an AMP policy, use keyboard_velocity_commands
+            if func_name == "velocity_commands" and has_amp_terms and "keyboard_velocity_commands" in registered_observations:
+                deploy_obs_name = "keyboard_velocity_commands"
+            else:
+                deploy_obs_name = func_name
         # Check if original name is registered
         elif obs_name in registered_observations:
-            deploy_obs_name = obs_name
+            # Special handling: if obs_name is "velocity_commands" and this is an AMP policy, use keyboard_velocity_commands
+            if obs_name == "velocity_commands" and has_amp_terms and "keyboard_velocity_commands" in registered_observations:
+                deploy_obs_name = "keyboard_velocity_commands"
+            else:
+                deploy_obs_name = obs_name
         # Special case: generated_commands -> keyboard_velocity_commands for AMP, velocity_commands for velocity
         elif func_name == "generated_commands":
             # For AMP policies, always use keyboard_velocity_commands

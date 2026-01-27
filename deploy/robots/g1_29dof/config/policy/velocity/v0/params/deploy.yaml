@@ -34,7 +34,7 @@ observations:
     params: {}
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
     history_length: 5
-  velocity_commands:
+  keyboard_velocity_commands:
     params: {command_name: base_velocity}
     scale: [1.0, 1.0, 1.0]
     history_length: 5
@@ -63,5 +63,5 @@ observations:
       1.0, 1.0, 1.0, 1.0]
     history_length: 5
   use_gym_history: false
-  obs_order: [base_ang_vel, root_local_rot_tan_norm, velocity_commands, joint_pos,
+  obs_order: [base_ang_vel, root_local_rot_tan_norm, keyboard_velocity_commands, joint_pos,
     joint_vel, last_action, key_body_pos_b]

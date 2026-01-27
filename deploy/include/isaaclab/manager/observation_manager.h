@@ -135,6 +135,9 @@ protected:
                 use_gym_history = it->second.as<bool>();
                 continue;
             }
+            if(key == "obs_order") { // skip obs_order, already parsed above
+                continue;
+            }
 
             /*** observation terms ***/
             const auto term_yaml_cfg = it->second;
