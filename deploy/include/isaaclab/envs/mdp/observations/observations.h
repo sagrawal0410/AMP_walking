@@ -6,6 +6,7 @@
 #include "isaaclab/envs/manager_based_rl_env.h"
 #include <cmath>
 #include <map>
+#include <spdlog/spdlog.h>
 
 namespace isaaclab
 {
@@ -510,6 +511,16 @@ REGISTER_OBSERVATION(key_body_pos_b)
     // Convert Eigen vector to std::vector
     const auto& joint_pos_eigen = asset->data.joint_pos;
     std::vector<float> joint_pos(joint_pos_eigen.data(), joint_pos_eigen.data() + joint_pos_eigen.size());
+    
+    // Debug logging (prints every 100 calls)
+    static int fk_debug_count = 0;
+    if (fk_debug_count++ % 100 == 0) {
+        for (size_t i = 0; i < num_key_bodies; ++i) {
+            Eigen::Vector3f pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
+            spdlog::info("FK[{}] {}: [{:.4f}, {:.4f}, {:.4f}]", 
+                        fk_debug_count, body_names[i], pos.x(), pos.y(), pos.z());
+        }
+    }
     
     // Compute FK for each key body
     for (size_t i = 0; i < num_key_bodies; ++i) {
