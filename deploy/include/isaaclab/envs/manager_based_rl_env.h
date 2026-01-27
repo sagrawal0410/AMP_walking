@@ -49,24 +49,23 @@ public:
             robot->data.joint_ids_map.clear();
             size_t idx = 0;
             for (YAML::const_iterator it = joint_ids_node.begin(); it != joint_ids_node.end(); ++it, ++idx) {
-                int val = 0;
                 if (it->IsNull()) {
-                    // Skip null values or treat as 0
-                    spdlog::warn("joint_ids_map[{}] is null, using 0", idx);
-                } else if (it->IsScalar()) {
-                    // Get raw scalar string and parse
-                    std::string str_val = it->Scalar();
-                    try {
-                        val = std::stoi(str_val);
-                    } catch (const std::exception& e) {
-                        spdlog::error("Failed to convert joint_ids_map[{}] '{}' to int: {}", idx, str_val, e.what());
-                        throw;
-                    }
-                } else {
-                    spdlog::error("joint_ids_map[{}] has unexpected type: {}", idx, it->Type());
-                    throw std::runtime_error("Unexpected node type in joint_ids_map");
+                    spdlog::error("joint_ids_map[{}] is null - invalid YAML", idx);
+                    throw std::runtime_error("joint_ids_map contains null values - check deploy.yaml");
                 }
-                robot->data.joint_ids_map.push_back(static_cast<float>(val));
+                if (!it->IsScalar()) {
+                    spdlog::error("joint_ids_map[{}] is not a scalar (type: {})", idx, it->Type());
+                    throw std::runtime_error("joint_ids_map contains non-scalar values");
+                }
+                // Get raw scalar string and parse
+                std::string str_val = it->Scalar();
+                try {
+                    int val = std::stoi(str_val);
+                    robot->data.joint_ids_map.push_back(static_cast<float>(val));
+                } catch (const std::exception& e) {
+                    spdlog::error("Failed to convert joint_ids_map[{}] '{}' to int: {}", idx, str_val, e.what());
+                    throw;
+                }
             }
             spdlog::debug("Parsed {} joint IDs", robot->data.joint_ids_map.size());
         } catch (const std::exception& e) {
