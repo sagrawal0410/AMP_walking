@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <spdlog/spdlog.h>
 #include "isaaclab/manager/manager_term_cfg.h"
+#include "isaaclab/utils/debug_utils.h"
 #include <iostream>
 
 namespace isaaclab
@@ -68,8 +69,44 @@ public:
         std::vector<float> obs;
         auto& group_terms = group_obs_term_cfgs_.at(group_name);
 
+        // Add current observation to history buffers
         for(auto & term : group_terms) {
             term.add(term.func(this->env, term.params));
+        }
+
+        // Debug: Print history buffer status
+        if (isaaclab::debug::is_debug_enabled()) {
+            static int call_count = 0;
+            if (call_count++ % 50 == 0) {
+                spdlog::info("[DEBUG] ========== HISTORY STACKING DEBUG ==========");
+                spdlog::info("[DEBUG] use_gym_history = {}", use_gym_history);
+                for (size_t i = 0; i < group_terms.size(); ++i) {
+                    const auto& term = group_terms[i];
+                    std::string term_name = (i < obs_order_.size()) ? obs_order_[i] : "unknown";
+                    
+                    // Compute per-step dimension
+                    size_t total_size = term.size();
+                    size_t per_step_dim = (term.history_length > 0) ? (total_size / term.history_length) : total_size;
+                    size_t buffer_size = term.history_length;
+                    
+                    spdlog::info("[DEBUG] Term[{}] '{}': history_length={}, buffer_size={}, per_step_dim={}, total_size={}", 
+                                i, term_name, term.history_length, buffer_size, per_step_dim, total_size);
+                    
+                    // Print first 3 values of each timestep slice (oldest->newest)
+                    if (term.history_length > 0 && buffer_size > 0) {
+                        spdlog::info("[DEBUG]   History order: oldest->newest (buff_[0] is oldest, buff_[N-1] is newest)");
+                        for (int h = 0; h < term.history_length && h < 5; ++h) {
+                            auto hist_slice = term.get(h);
+                            if (hist_slice.size() >= 3) {
+                                spdlog::info("[DEBUG]   hist[{}] ({} of {}) first 3: [{:.4f}, {:.4f}, {:.4f}]", 
+                                            h, (h == 0 ? "oldest" : (h == term.history_length-1 ? "newest" : "middle")),
+                                            term.history_length, hist_slice[0], hist_slice[1], hist_slice[2]);
+                            }
+                        }
+                    }
+                }
+                spdlog::info("[DEBUG] ============================================");
+            }
         }
 
         if(use_gym_history)
@@ -85,12 +122,44 @@ public:
         }
         else
         {
+            // Concatenate history: oldest->newest (term.get() returns flattened history)
             for(const auto & term : group_terms)
             {
                 auto obs_ = term.get();
                 obs.insert(obs.end(), obs_.begin(), obs_.end());
             }
         }
+        
+        // Debug: Verify final obs size and slice boundaries
+        if (isaaclab::debug::is_debug_enabled()) {
+            static int verify_count = 0;
+            if (verify_count++ % 50 == 0) {
+                spdlog::info("[DEBUG] ========== FINAL OBS VECTOR VERIFICATION ==========");
+                spdlog::info("[DEBUG] Total obs size = {} (expected 585)", obs.size());
+                
+                if (obs.size() != 585) {
+                    spdlog::error("[DEBUG] CRITICAL: Obs size mismatch! Expected 585, got {}", obs.size());
+                } else {
+                    spdlog::info("[DEBUG] Obs size OK: 585");
+                    isaaclab::debug::print_slice_info();
+                    
+                    // Print slice stats
+                    isaaclab::debug::print_slice_stats(obs, 0, 15, "base_ang_vel");
+                    isaaclab::debug::print_slice_stats(obs, 15, 45, "root_local_rot_tan_norm");
+                    isaaclab::debug::print_slice_stats(obs, 45, 60, "keyboard_velocity_commands");
+                    isaaclab::debug::print_slice_stats(obs, 60, 205, "joint_pos");
+                    isaaclab::debug::print_slice_stats(obs, 205, 350, "joint_vel");
+                    isaaclab::debug::print_slice_stats(obs, 350, 495, "actions");
+                    isaaclab::debug::print_slice_stats(obs, 495, 585, "key_body_pos_b");
+                    
+                    // Global stats
+                    isaaclab::debug::print_stats(obs, "obs_585_global");
+                    isaaclab::debug::check_finite(obs, "obs_585_global");
+                }
+                spdlog::info("[DEBUG] ===================================================");
+            }
+        }
+        
         return obs;
     }
 

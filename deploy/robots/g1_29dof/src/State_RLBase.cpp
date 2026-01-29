@@ -56,6 +56,19 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
         if(std::abs(current_cmd[i]) < 0.01f) current_cmd[i] = 0.0f;
     }
     
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
+            isaaclab::debug::print_stats(current_cmd, "keyboard_velocity_commands");
+            isaaclab::debug::print_first(current_cmd, "keyboard_velocity_commands", 3);
+            isaaclab::debug::check_finite(current_cmd, "keyboard_velocity_commands");
+            spdlog::info("[DEBUG] keyboard_velocity_commands: [vx={:.4f}, vy={:.4f}, yaw_rate={:.4f}]", 
+                        current_cmd[0], current_cmd[1], current_cmd[2]);
+            spdlog::info("[DEBUG] keyboard_velocity_commands: ranges should match training: lin_vel_x[-0.5,3.0], lin_vel_y[-0.5,0.5], ang_vel_z[-1.0,1.0]");
+        }
+    }
+    
     return current_cmd;
 }
 

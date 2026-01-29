@@ -4,6 +4,7 @@
 #pragma once
 
 #include "onnxruntime_cxx_api.h"
+#include "isaaclab/utils/debug_utils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -145,6 +146,21 @@ public:
         std::vector<std::vector<float>> owned_buffers;
         owned_buffers.reserve(input_names.size());
 
+        // ONNX Input Debug (PART 8)
+        if (isaaclab::debug::is_debug_enabled()) {
+            static int onnx_call_count = 0;
+            if (onnx_call_count++ % 50 == 0) {
+                spdlog::info("[DEBUG] ========== ONNX INPUT DEBUG ==========");
+                for (size_t i = 0; i < input_names.size(); ++i) {
+                    const std::string name(input_names[i]);
+                    auto& input_data = obs.at(name);
+                    spdlog::info("[DEBUG] ONNX input[{}] '{}': expected={}, got={}", 
+                                i, name, input_sizes[i], input_data.size());
+                }
+                spdlog::info("[DEBUG] ======================================");
+            }
+        }
+
         // Build input tensors
         std::vector<Ort::Value> input_tensors;
         input_tensors.reserve(input_names.size());
@@ -157,10 +173,12 @@ public:
             const size_t got = input_data.size();
 
             if (got != expected) {
-                spdlog::warn(
-                    "Observation['{}'] size mismatch: got {}, expected {}. Fixing (pad/truncate).",
-                    name, got, expected
-                );
+                spdlog::error("[DEBUG] CRITICAL: Observation['{}'] size mismatch: got {}, expected {}. DO NOT PAD/TRUNCATE!", 
+                    name, got, expected);
+                spdlog::error("[DEBUG] This indicates a serious bug in observation assembly!");
+                // Hard assert - do not silently pad
+                throw std::runtime_error("Observation size mismatch: " + name + " got " + std::to_string(got) + 
+                                        " expected " + std::to_string(expected));
 
                 // Allocate owned buffer of correct size and fill with zeros
                 owned_buffers.emplace_back(expected, 0.0f);
@@ -189,6 +207,21 @@ public:
                         input_shapes[i].size()
                     )
                 );
+            }
+        }
+
+        // Dump observations if enabled (PART 9)
+        if (isaaclab::debug::is_dump_enabled()) {
+            int step = isaaclab::debug::get_current_step();
+            if (step <= 200) {  // Only dump first 200 steps
+                std::string dump_dir = isaaclab::debug::get_dump_dir();
+                for (const auto& name_c : input_names) {
+                    const std::string name(name_c);
+                    auto& input_data = obs.at(name);
+                    std::string filepath = dump_dir + "/obs_" + name + "_step_" + 
+                                         std::to_string(step) + ".csv";
+                    isaaclab::debug::dump_csv(filepath, input_data);
+                }
             }
         }
 
@@ -230,13 +263,42 @@ public:
             std::memcpy(action.data(), out_ptr, action.size() * sizeof(float));
         }
 
+        // ONNX Output Debug (PART 8)
+        if (isaaclab::debug::is_debug_enabled()) {
+            static int output_debug_count = 0;
+            if (output_debug_count++ % 50 == 0) {
+                std::lock_guard<std::mutex> lock(act_mtx_);
+                spdlog::info("[DEBUG] ========== ONNX OUTPUT DEBUG ==========");
+                spdlog::info("[DEBUG] Output shape: [{}]", out_numel);
+                isaaclab::debug::print_stats(action, "action_raw");
+                isaaclab::debug::print_first(action, "action_raw", 10);
+                size_t sat_count = isaaclab::debug::count_saturation(action, 0.95f);
+                spdlog::info("[DEBUG] Action saturation count (|a|>0.95) = {}/{}", sat_count, action.size());
+                if (sat_count > action.size() * 0.3f) {
+                    spdlog::warn("[DEBUG] WARNING: >30% saturated during standing -> normalization/scale/order mismatch!");
+                }
+                spdlog::info("[DEBUG] ========================================");
+            }
+        }
+
+        // Dump actions if enabled (PART 9)
+        if (isaaclab::debug::is_dump_enabled()) {
+            int step = isaaclab::debug::get_current_step();
+            if (step <= 200) {
+                std::lock_guard<std::mutex> lock(act_mtx_);
+                std::string dump_dir = isaaclab::debug::get_dump_dir();
+                std::string filepath = dump_dir + "/act_step_" + std::to_string(step) + ".csv";
+                isaaclab::debug::dump_csv(filepath, action);
+            }
+        }
+
         // Validate action outputs
         bool action_valid = true;
         {
             std::lock_guard<std::mutex> lock(act_mtx_);
             for (size_t i = 0; i < action.size(); ++i) {
                 if (!std::isfinite(action[i])) {
-                    spdlog::error("Policy output NaN/Inf at action[{}] = {}. Setting to zero.", i, action[i]);
+                    spdlog::error("[DEBUG] CRITICAL: Policy output NaN/Inf at action[{}] = {}. Setting to zero.", i, action[i]);
                     action[i] = 0.0f;
                     action_valid = false;
                 }
@@ -244,7 +306,19 @@ public:
         }
 
         if (!action_valid) {
-            spdlog::error("Policy produced invalid outputs! Actions sanitized.");
+            spdlog::error("[DEBUG] CRITICAL: Policy produced invalid outputs! Actions sanitized.");
+            if (isaaclab::debug::is_dump_enabled()) {
+                // Dump obs for debugging
+                int step = isaaclab::debug::get_current_step();
+                std::string dump_dir = isaaclab::debug::get_dump_dir();
+                for (const auto& name_c : input_names) {
+                    const std::string name(name_c);
+                    auto& input_data = obs.at(name);
+                    std::string filepath = dump_dir + "/obs_" + name + "_NAN_step_" + 
+                                         std::to_string(step) + ".csv";
+                    isaaclab::debug::dump_csv(filepath, input_data);
+                }
+            }
         }
 
         return get_action();

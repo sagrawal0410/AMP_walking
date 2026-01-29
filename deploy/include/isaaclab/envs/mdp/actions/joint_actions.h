@@ -17,11 +17,17 @@ public:
     JointAction(YAML::Node cfg, ManagerBasedRLEnv* env)
     :ActionTerm(cfg, env)
     {
-        if(!cfg["joint_ids"].IsDefined() || cfg["joint_ids"].IsNull()) {
-            _action_dim = env->robot->data.joint_ids_map.size();
+        if(cfg["joint_ids"].IsDefined() && !cfg["joint_ids"].IsNull()) {
+            try {
+                _joint_ids = cfg["joint_ids"].as<std::vector<int>>();
+                _action_dim = _joint_ids.size();
+            } catch(const std::exception& e) {
+                // If parsing fails, use all joints
+                spdlog::warn("Failed to parse joint_ids, using all joints: {}", e.what());
+                _action_dim = env->robot->data.joint_ids_map.size();
+            }
         } else {
-            _joint_ids = cfg["joint_ids"].as<std::vector<int>>();
-            _action_dim = _joint_ids.size();
+            _action_dim = env->robot->data.joint_ids_map.size();
         }
         _raw_actions.resize(_action_dim, 0.0f);
         _processed_actions.resize(_action_dim, 0.0f);

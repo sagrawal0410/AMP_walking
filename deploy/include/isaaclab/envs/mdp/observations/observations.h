@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include "isaaclab/utils/debug_utils.h"
+
 #include "isaaclab/envs/manager_based_rl_env.h"
 #include <cmath>
 #include <map>
@@ -284,7 +286,20 @@ REGISTER_OBSERVATION(base_ang_vel)
 {
     auto & asset = env->robot;
     auto & data = asset->data.root_ang_vel_b;
-    return std::vector<float>(data.data(), data.data() + data.size());
+    std::vector<float> obs(data.data(), data.data() + data.size());
+    
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {  // Print every 50 calls (every ~1 second at 50Hz)
+            isaaclab::debug::print_stats(obs, "base_ang_vel");
+            isaaclab::debug::print_first(obs, "base_ang_vel", 3);
+            isaaclab::debug::check_finite(obs, "base_ang_vel");
+            spdlog::info("[DEBUG] base_ang_vel: units should be rad/s, values should be small when standing");
+        }
+    }
+    
+    return obs;
 }
 
 REGISTER_OBSERVATION(projected_gravity)
@@ -319,6 +334,33 @@ REGISTER_OBSERVATION(joint_pos)
         for(size_t i = 0; i < joint_ids.size(); ++i)
         {
             data[i] = asset->data.joint_pos[joint_ids[i]];
+        }
+    }
+
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
+            isaaclab::debug::print_stats(data, "joint_pos");
+            isaaclab::debug::print_first(data, "joint_pos", 6);
+            isaaclab::debug::check_finite(data, "joint_pos");
+            
+            // Compute relative to default
+            if (data.size() == asset->data.default_joint_pos.size()) {
+                std::vector<float> rel_data(data.size());
+                float max_abs_rel = 0.0f;
+                for (size_t i = 0; i < data.size(); ++i) {
+                    rel_data[i] = data[i] - asset->data.default_joint_pos[i];
+                    max_abs_rel = std::max(max_abs_rel, std::abs(rel_data[i]));
+                }
+                spdlog::info("[DEBUG] joint_pos: max|q - q_default| = {:.4f} rad", max_abs_rel);
+            }
+            
+            if (!joint_ids.empty()) {
+                spdlog::info("[DEBUG] joint_pos: using joint_ids filter ({} joints)", joint_ids.size());
+            } else {
+                spdlog::info("[DEBUG] joint_pos: using all {} joints (no filter)", data.size());
+            }
         }
     }
 
@@ -381,6 +423,21 @@ REGISTER_OBSERVATION(joint_vel)
         }
     }
 
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
+            isaaclab::debug::print_stats(data, "joint_vel");
+            isaaclab::debug::print_first(data, "joint_vel", 6);
+            isaaclab::debug::check_finite(data, "joint_vel");
+            float max_abs_vel = 0.0f;
+            for (float v : data) {
+                max_abs_vel = std::max(max_abs_vel, std::abs(v));
+            }
+            spdlog::info("[DEBUG] joint_vel: max|dq| = {:.4f} rad/s (should be near 0 when standing)", max_abs_vel);
+        }
+    }
+
     return data;
 }
 
@@ -405,8 +462,26 @@ REGISTER_OBSERVATION(joint_vel_rel)
 
 REGISTER_OBSERVATION(last_action)
 {
-    auto data = env->action_manager->action();
-    return std::vector<float>(data.data(), data.data() + data.size());
+    auto data_eigen = env->action_manager->action();
+    std::vector<float> obs(data_eigen.data(), data_eigen.data() + data_eigen.size());
+    
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
+            isaaclab::debug::print_stats(obs, "last_action");
+            isaaclab::debug::print_first(obs, "last_action", 6);
+            isaaclab::debug::check_finite(obs, "last_action");
+            size_t sat_count = isaaclab::debug::count_saturation(obs, 0.95f);
+            spdlog::info("[DEBUG] last_action: saturation count (|a|>0.95) = {}/{}", sat_count, obs.size());
+            if (sat_count > obs.size() * 0.3f) {
+                spdlog::warn("[DEBUG] last_action: WARNING: >30% saturated -> normalization/scale/order mismatch possible!");
+            }
+            spdlog::info("[DEBUG] last_action: This is the previous action fed into obs (post-scale/offset, raw network output)");
+        }
+    }
+    
+    return obs;
 };
 
 REGISTER_OBSERVATION(velocity_commands)
@@ -471,6 +546,19 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     obs[4] = norm_vec.y();
     obs[5] = norm_vec.z();
     
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
+            isaaclab::debug::print_stats(obs, "root_local_rot_tan_norm");
+            isaaclab::debug::print_first(obs, "root_local_rot_tan_norm", 6);
+            isaaclab::debug::orthonormal_check_rot6(obs, "root_local_rot_tan_norm");
+            isaaclab::debug::check_finite(obs, "root_local_rot_tan_norm");
+            spdlog::info("[DEBUG] root_local_rot_tan_norm: quaternion order is wxyz (Eigen default)");
+            spdlog::info("[DEBUG] root_local_rot_tan_norm: yaw={:.4f} rad, yaw removed from root_quat_w", yaw);
+        }
+    }
+    
     return obs;
 }
 
@@ -528,6 +616,41 @@ REGISTER_OBSERVATION(key_body_pos_b)
         obs[i * 3 + 0] = pos.x();
         obs[i * 3 + 1] = pos.y();
         obs[i * 3 + 2] = pos.z();
+    }
+    
+    // Debug instrumentation
+    if (isaaclab::debug::is_debug_enabled()) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
+            isaaclab::debug::print_stats(obs, "key_body_pos_b");
+            isaaclab::debug::check_finite(obs, "key_body_pos_b");
+            
+            // Print each body's xyz separately with labels
+            spdlog::info("[DEBUG] key_body_pos_b: per-body positions (base frame):");
+            for (size_t i = 0; i < num_key_bodies; ++i) {
+                float x = obs[i * 3 + 0];
+                float y = obs[i * 3 + 1];
+                float z = obs[i * 3 + 2];
+                spdlog::info("[DEBUG]   {} xyz = [{:.4f}, {:.4f}, {:.4f}]", body_names[i], x, y, z);
+            }
+            
+            // Check for zeros or huge values
+            float max_abs = 0.0f;
+            bool has_zero = false;
+            for (float v : obs) {
+                max_abs = std::max(max_abs, std::abs(v));
+                if (std::abs(v) < 1e-6f) has_zero = true;
+            }
+            spdlog::info("[DEBUG] key_body_pos_b: max|pos| = {:.4f} m", max_abs);
+            if (has_zero) {
+                spdlog::warn("[DEBUG] key_body_pos_b: WARNING: Contains near-zero values -> FK may not be working!");
+            }
+            if (max_abs > 10.0f) {
+                spdlog::warn("[DEBUG] key_body_pos_b: WARNING: Very large positions (>10m) -> wrong frame transform or FK error!");
+            }
+            
+            spdlog::info("[DEBUG] key_body_pos_b: Order must match: [LA.xyz, RA.xyz, LW.xyz, RW.xyz, LS.xyz, RS.xyz]");
+        }
     }
     
     return obs;

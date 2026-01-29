@@ -7,6 +7,8 @@
 #include <vector>
 #include <functional>
 #include <numeric>
+#include "isaaclab/utils/debug_utils.h"
+#include <spdlog/spdlog.h>
 
 namespace isaaclab
 {
@@ -26,7 +28,19 @@ struct ObservationTermCfg
 
     void reset(std::vector<float> obs)
     {
-        for(int i(0); i < history_length; ++i) add(obs);
+        buff_.clear();
+        // Safe initialization: fill history with first observed frame repeated (not zeros)
+        for(int i(0); i < history_length; ++i) {
+            add(obs);  // This will apply scale/clip, but we want the same value repeated
+        }
+        
+        // Debug: log when buffer is fully warmed
+        if (isaaclab::debug::is_debug_enabled()) {
+            if (buff_.size() == static_cast<size_t>(history_length)) {
+                spdlog::info("[DEBUG] History buffer fully warmed: size={}, history_length={}", 
+                            buff_.size(), history_length);
+            }
+        }
     }
 
     void add(std::vector<float> obs)
