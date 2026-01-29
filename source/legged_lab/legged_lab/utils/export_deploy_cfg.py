@@ -63,7 +63,8 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     joint_ids_map, _ = resolve_matching_names(asset.data.joint_names, joint_sdk_names, preserve_order=True)
 
     cfg = {}  # noqa: SIM904
-    cfg["joint_ids_map"] = joint_ids_map
+    # Filter out None values from joint_ids_map (shouldn't happen, but be safe)
+    cfg["joint_ids_map"] = [int(x) if x is not None else 0 for x in joint_ids_map]
     cfg["step_dt"] = env.cfg.sim.dt * env.cfg.decimation
     stiffness = np.zeros(len(joint_sdk_names))
     stiffness[joint_ids_map] = asset.data.default_joint_stiffness[0].detach().cpu().numpy().tolist()
@@ -150,6 +151,19 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             cfg["actions"][action_class_name]["joint_ids"] = None
         else:
             cfg["actions"][action_class_name]["joint_ids"] = action_term._joint_ids
+        
+        # Ensure joint_names is not None (should be a list or None, but if it's None, remove it)
+        if "joint_names" in cfg["actions"][action_class_name]:
+            joint_names = cfg["actions"][action_class_name]["joint_names"]
+            if joint_names is None:
+                # Remove joint_names if None (C++ doesn't need it if joint_ids is set)
+                del cfg["actions"][action_class_name]["joint_names"]
+            elif isinstance(joint_names, (list, tuple)) and len(joint_names) == 0:
+                # Remove empty list
+                del cfg["actions"][action_class_name]["joint_names"]
+            elif isinstance(joint_names, list) and all(x is None for x in joint_names):
+                # Remove if all elements are None
+                del cfg["actions"][action_class_name]["joint_names"]
 
     # --- observations ---
     # List of observations registered in the deploy code
@@ -234,7 +248,13 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         if deploy_obs_name == "keyboard_velocity_commands":
             # keyboard_velocity_commands uses the same params as velocity_commands
             # but is registered separately in State_RLBase.cpp
-            pass
+            # Ensure params has command_name set
+            if "params" not in term_cfg or term_cfg.get("params") is None:
+                term_cfg["params"] = {}
+            if not isinstance(term_cfg["params"], dict):
+                term_cfg["params"] = {}
+            if "command_name" not in term_cfg["params"] or term_cfg["params"].get("command_name") is None:
+                term_cfg["params"]["command_name"] = "base_velocity"
             
         obs_dims = tuple(obs_cfg.func(env, **obs_cfg.params).shape)
         term_cfg = obs_cfg.copy()
@@ -273,11 +293,20 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
                 # Fallback: try direct conversion
                 term_cfg.clip = list(term_cfg.clip) if hasattr(term_cfg.clip, '__iter__') else None
         
-        if term_cfg.history_length == 0:
-            term_cfg.history_length = 1
+        # Ensure history_length is set (default to 5 for AMP policies, 1 otherwise)
+        if not hasattr(term_cfg, 'history_length') or term_cfg.history_length is None or term_cfg.history_length == 0:
+            # For AMP policies, use history_length=5, otherwise use 1
+            term_cfg.history_length = 5 if has_amp_terms else 1
 
         # clean cfg
         term_cfg = term_cfg.to_dict()
+        
+        # Ensure history_length is in the dict and not None (must be an integer)
+        if "history_length" not in term_cfg or term_cfg.get("history_length") is None:
+            term_cfg["history_length"] = 5 if has_amp_terms else 1
+        else:
+            # Ensure it's an int, not None
+            term_cfg["history_length"] = int(term_cfg["history_length"]) if term_cfg["history_length"] is not None else (5 if has_amp_terms else 1)
         for _ in ["func", "modifiers", "noise", "flatten_history_dim"]:
             if _ in term_cfg:
                 del term_cfg[_]
@@ -308,9 +337,16 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             if hasattr(params_obj, 'to_dict'):
                 return convert_params_to_dict(params_obj.to_dict())
             
-            # If it's a list/tuple, recursively process elements
+            # If it's a list/tuple, recursively process elements and filter out None/slice
             if isinstance(params_obj, (list, tuple)):
-                return [convert_params_to_dict(item) for item in params_obj if not isinstance(item, slice)]
+                result = []
+                for item in params_obj:
+                    if isinstance(item, slice):
+                        continue  # Skip slice objects
+                    converted = convert_params_to_dict(item)
+                    if converted is not None:  # Only add non-None values
+                        result.append(converted)
+                return result
             
             # For primitive types or objects we can't convert, try class_to_dict
             try:
@@ -352,6 +388,14 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         if term_cfg.get("params") is None:
             term_cfg["params"] = {}
         
+        # Post-process params to ensure no None values in critical fields
+        if isinstance(term_cfg.get("params"), dict):
+            params_dict = term_cfg["params"]
+            # Fix command_name for velocity_commands/keyboard_velocity_commands
+            if deploy_obs_name in ["velocity_commands", "keyboard_velocity_commands"]:
+                if "command_name" not in params_dict or params_dict.get("command_name") is None:
+                    params_dict["command_name"] = "base_velocity"
+        
         # Special handling for key_body_pos_b: ensure body_names are exported correctly
         if deploy_obs_name == "key_body_pos_b" and "params" in term_cfg:
             # Extract body_names from asset_cfg if present
@@ -359,21 +403,50 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             if isinstance(params_dict, dict) and "asset_cfg" in params_dict:
                 asset_cfg_dict = params_dict["asset_cfg"]
                 if isinstance(asset_cfg_dict, dict):
-                    # Get body_names, ensuring it's a list
+                    # Get body_names, ensuring it's a list of strings (not None)
                     body_names = asset_cfg_dict.get("body_names", [])
                     if isinstance(body_names, (list, tuple)):
-                        body_names = list(body_names)
+                        # Filter out None values and ensure all are strings
+                        body_names = [str(x) for x in body_names if x is not None]
                     elif body_names is None:
+                        # Default key body names for G1
+                        body_names = [
+                            "left_ankle_roll_link",
+                            "right_ankle_roll_link",
+                            "left_wrist_yaw_link",
+                            "right_wrist_yaw_link",
+                            "left_shoulder_roll_link",
+                            "right_shoulder_roll_link"
+                        ]
+                    else:
                         body_names = []
+                    
+                    # Get name, default to "robot" if None
+                    name = asset_cfg_dict.get("name", "robot")
+                    if name is None:
+                        name = "robot"
                     
                     # Remove non-serializable fields like slice objects, body_ids (computed), etc.
                     # Keep only what C++ needs: name and body_names
                     clean_asset_cfg = {
-                        "name": asset_cfg_dict.get("name", "robot"),
+                        "name": str(name),
                         "body_names": body_names
                     }
                     params_dict["asset_cfg"] = clean_asset_cfg
                     # Preserve the structure for C++ parsing
+            elif "asset_cfg" not in params_dict or params_dict.get("asset_cfg") is None:
+                # If asset_cfg is missing, add default
+                params_dict["asset_cfg"] = {
+                    "name": "robot",
+                    "body_names": [
+                        "left_ankle_roll_link",
+                        "right_ankle_roll_link",
+                        "left_wrist_yaw_link",
+                        "right_wrist_yaw_link",
+                        "left_shoulder_roll_link",
+                        "right_shoulder_roll_link"
+                    ]
+                }
         
         # Ensure clip is None (not empty list) if not set
         if "clip" in term_cfg:
@@ -395,8 +468,8 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         # This ensures history is concatenated per term: [term1_h0, term1_h1, ..., term1_h4, term2_h0, ...]
         # Instead of interleaved: [term1_h0, term2_h0, ..., term1_h1, term2_h1, ...]
         cfg["observations"]["use_gym_history"] = False
-        # Store observation order explicitly (critical for AMP policies)
-        cfg["observations"]["obs_order"] = obs_order
+        # Store observation order explicitly (critical for AMP policies) - filter out None values
+        cfg["observations"]["obs_order"] = [x for x in obs_order if x is not None]
 
     # --- save config file ---
     filename = os.path.join(log_dir, "params", "deploy.yaml")
@@ -428,6 +501,23 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             return obj
     
     cfg = clean_yaml_types(cfg)
+    
+    # Final cleanup: remove None values from lists (but keep them in dicts as null for YAML)
+    def remove_none_from_lists(obj):
+        """Recursively remove None values from lists, but keep them in dicts."""
+        if isinstance(obj, dict):
+            return {k: remove_none_from_lists(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            # Filter out None values from lists
+            filtered = [remove_none_from_lists(item) for item in obj if item is not None]
+            return filtered
+        else:
+            return obj
+    
+    # Only remove None from lists, not from dicts (dicts can have null values)
+    # But for critical fields like obs_order and joint_ids_map, we want to ensure no None
+    if "observations" in cfg and "obs_order" in cfg["observations"]:
+        cfg["observations"]["obs_order"] = [x for x in cfg["observations"]["obs_order"] if x is not None]
     
     # Use SafeDumper to avoid Python-specific tags like !!python/tuple
     # and ensure clean YAML output
