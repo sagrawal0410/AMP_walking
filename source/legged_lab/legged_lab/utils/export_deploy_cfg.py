@@ -60,8 +60,15 @@ def format_value(x):
 def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     asset: Articulation = env.scene["robot"]
     joint_sdk_names = env.cfg.scene.robot.joint_sdk_names
-    joint_ids_map, _ = resolve_matching_names(asset.data.joint_names, joint_sdk_names, preserve_order=True)
+    print(f"Internal joint names ({len(asset.data.joint_names)}):")
+    for i, name in enumerate(asset.data.joint_names):
+        print(f"  [{i:2d}] {name}")
 
+    print(f"\nSDK joint names ({len(joint_sdk_names)}):")
+    for i, name in enumerate(joint_sdk_names):
+        print(f"  [{i:2d}] {name}")
+    joint_ids_map, _ = resolve_matching_names(asset.data.joint_names, joint_sdk_names, preserve_order=True)
+    print(f"\njoint_ids_map result: {joint_ids_map}")
     cfg = {}  # noqa: SIM904
     # Convert joint_ids_map to list of integers (resolve_matching_names returns numpy array or list)
     if isinstance(joint_ids_map, np.ndarray):
