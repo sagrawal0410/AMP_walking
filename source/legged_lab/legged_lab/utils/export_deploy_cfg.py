@@ -636,7 +636,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     
     # Apply final cleanup - but preserve critical fields
     cfg = clean_cfg_recursive(cfg)
-    print(f"\njoint_ids_map result: {cfg["joint_ids_map"]}")
+    print("\njoint_ids_map result: "+ cfg["joint_ids_map"])
     # Post-cleanup validation: Ensure critical fields are not empty and have correct types
     if "joint_ids_map" in cfg:
         if not isinstance(cfg["joint_ids_map"], list):
