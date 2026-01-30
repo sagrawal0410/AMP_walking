@@ -554,7 +554,6 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     print("\njoint_ids_map result: "+ str(cfg["joint_ids_map"]))
     # Format all values to ensure proper YAML serialization
     # This converts tuples to lists, numpy types to Python types, etc.
-    cfg = format_value(cfg)
     
     # Final pass: ensure no Python-specific types remain
     def clean_yaml_types(obj):
