@@ -319,7 +319,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
 
         # clean cfg
         term_cfg = term_cfg.to_dict()
-        
+        print("\njoint_ids_map result: "+ str(term_cfg["joint_ids_map"]))
         # Ensure history_length is in the dict and not None (must be an integer)
         if "history_length" not in term_cfg or term_cfg.get("history_length") is None:
             term_cfg["history_length"] = 5 if has_amp_terms else 1
@@ -555,7 +555,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     # Format all values to ensure proper YAML serialization
     # This converts tuples to lists, numpy types to Python types, etc.
     cfg = format_value(cfg)
-    print("\njoint_ids_map result: "+ str(cfg["joint_ids_map"]))
+    
     # Final pass: ensure no Python-specific types remain
     def clean_yaml_types(obj):
         """Recursively clean Python-specific types for YAML."""
@@ -636,6 +636,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     
     # Apply final cleanup - but preserve critical fields
     cfg = clean_cfg_recursive(cfg)
+
     # Post-cleanup validation: Ensure critical fields are not empty and have correct types
     if "joint_ids_map" in cfg:
         if not isinstance(cfg["joint_ids_map"], list):
