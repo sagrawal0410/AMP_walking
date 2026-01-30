@@ -555,7 +555,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     # Format all values to ensure proper YAML serialization
     # This converts tuples to lists, numpy types to Python types, etc.
     cfg = format_value(cfg)
-    
+    print("\njoint_ids_map result: "+ str(cfg["joint_ids_map"]))
     # Final pass: ensure no Python-specific types remain
     def clean_yaml_types(obj):
         """Recursively clean Python-specific types for YAML."""
@@ -636,7 +636,6 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     
     # Apply final cleanup - but preserve critical fields
     cfg = clean_cfg_recursive(cfg)
-    print("\njoint_ids_map result: "+ str(cfg["joint_ids_map"]))
     # Post-cleanup validation: Ensure critical fields are not empty and have correct types
     if "joint_ids_map" in cfg:
         if not isinstance(cfg["joint_ids_map"], list):
