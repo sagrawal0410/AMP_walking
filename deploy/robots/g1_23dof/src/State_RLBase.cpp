@@ -3,6 +3,7 @@
 #include "isaaclab/envs/mdp/observations/observations.h"
 #include "isaaclab/envs/mdp/actions/joint_actions.h"
 #include <unordered_map>
+#include <algorithm>
 
 namespace isaaclab
 {
@@ -31,30 +32,22 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
         {"e", {0.0f, 0.0f, -0.05f}}   // Turn right (50% max - CRITICAL: no ang curriculum)
     };
     
-    // Smooth velocity command with exponential smoothing
-    static std::vector<float> current_cmd = {0.0f, 0.0f, 0.0f};
-    static std::vector<float> target_cmd = {0.0f, 0.0f, 0.0f};
-    const float smoothing = 0.15f;  // Smooth acceleration (lower = smoother)
+    // Get command based on key press - return immediately (no smoothing) to match training behavior
+    // During training, generated_commands returns instantaneous values, so we must match that
+    std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
     
-    // Update target based on key press
     if (key_commands.find(key) != key_commands.end())
     {
-        target_cmd = key_commands[key];
-        spdlog::info("Command: [{:.3f}, {:.3f}, {:.3f}]", target_cmd[0], target_cmd[1], target_cmd[2]);
-    }
-    else
-    {
-        target_cmd = {0.0f, 0.0f, 0.0f};  // Stop when no key pressed
+        cmd = key_commands[key];
+        spdlog::info("Command: [{:.3f}, {:.3f}, {:.3f}]", cmd[0], cmd[1], cmd[2]);
     }
     
-    // Smooth interpolation to target
-    for(size_t i = 0; i < 3; i++) {
-        current_cmd[i] += (target_cmd[i] - current_cmd[i]) * smoothing;
-        // Deadzone for near-zero values
-        if(std::abs(current_cmd[i]) < 0.01f) current_cmd[i] = 0.0f;
-    }
+    // Clamp to training ranges (matching velocity_commands behavior)
+    cmd[0] = std::clamp(cmd[0], cfg["lin_vel_x"][0].as<float>(), cfg["lin_vel_x"][1].as<float>());
+    cmd[1] = std::clamp(cmd[1], cfg["lin_vel_y"][0].as<float>(), cfg["lin_vel_y"][1].as<float>());
+    cmd[2] = std::clamp(cmd[2], cfg["ang_vel_z"][0].as<float>(), cfg["ang_vel_z"][1].as<float>());
     
-    return current_cmd;
+    return cmd;
 }
 
 }
