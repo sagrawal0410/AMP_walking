@@ -66,8 +66,22 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     # Convert joint_ids_map to list of integers (resolve_matching_names returns numpy array or list)
     if isinstance(joint_ids_map, np.ndarray):
         joint_ids_map = joint_ids_map.tolist()
+    
+    # Validate joint_ids_map is not empty
+    if not joint_ids_map or len(joint_ids_map) == 0:
+        raise ValueError(
+            f"joint_ids_map is empty! This means joint name matching failed.\n"
+            f"Lab joint names: {asset.data.joint_names}\n"
+            f"SDK joint names: {joint_sdk_names}\n"
+            f"Check that joint_sdk_names in robot config matches the actual joint names."
+        )
+    
     # Ensure all values are integers, not None
     cfg["joint_ids_map"] = [int(x) if x is not None and not np.isnan(x) else 0 for x in joint_ids_map]
+    
+    # Validate the result is not empty
+    if len(cfg["joint_ids_map"]) == 0:
+        raise ValueError("joint_ids_map became empty after conversion! Check joint name matching.")
     cfg["step_dt"] = env.cfg.sim.dt * env.cfg.decimation
     stiffness = np.zeros(len(joint_sdk_names))
     stiffness[joint_ids_map] = asset.data.default_joint_stiffness[0].detach().cpu().numpy().tolist()
@@ -481,9 +495,16 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         else:
             term_cfg["history_length"] = int(term_cfg["history_length"])
         
+        # Ensure scale is not empty
+        if "scale" in term_cfg:
+            if term_cfg["scale"] is None or (isinstance(term_cfg["scale"], list) and len(term_cfg["scale"]) == 0):
+                # Recompute scale from observation dimensions
+                obs_dims = obs_cfg.dims if hasattr(obs_cfg, 'dims') else (1, term_cfg.get("history_length", 1))
+                term_cfg["scale"] = [1.0] * obs_dims[1]
+        
         # Use deploy observation name (not training name)
         cfg["observations"][deploy_obs_name] = term_cfg
-        if deploy_obs_name is not None:
+        if deploy_obs_name is not None and deploy_obs_name != "None":
             obs_order.append(deploy_obs_name)
     
     # Set use_gym_history and obs_order for AMP policies
@@ -495,19 +516,16 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         cfg["observations"]["use_gym_history"] = False
         # Store observation order explicitly (critical for AMP policies) - filter out None values and ensure strings
         filtered_order = [str(x) for x in obs_order if x is not None and str(x) != "None"]
-        if filtered_order:
-            cfg["observations"]["obs_order"] = filtered_order
-        else:
-            # Fallback: use default AMP order
-            cfg["observations"]["obs_order"] = [
-                "base_ang_vel",
-                "root_local_rot_tan_norm",
-                "keyboard_velocity_commands",
-                "joint_pos",
-                "joint_vel",
-                "last_action",
-                "key_body_pos_b"
-            ]
+        if not filtered_order or len(filtered_order) == 0:
+            # If obs_order is empty, this is a critical error - raise exception
+            raise ValueError(
+                f"CRITICAL: obs_order is empty! This means no observations were registered.\n"
+                f"Available observations in env: {list(env.observation_manager.active_terms.get('policy', {}).keys())}\n"
+                f"Registered observations: {registered_observations}\n"
+                f"obs_order collected: {obs_order}\n"
+                f"Check that observation terms are properly registered and match the expected names."
+            )
+        cfg["observations"]["obs_order"] = filtered_order
 
     # --- save config file ---
     filename = os.path.join(log_dir, "params", "deploy.yaml")
@@ -541,20 +559,36 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     cfg = clean_yaml_types(cfg)
     
     # Final cleanup: remove None values and ensure proper types
-    def clean_cfg_recursive(obj):
+    # CRITICAL: Preserve critical fields that must have values (joint_ids_map, obs_order, etc.)
+    critical_list_fields = {"joint_ids_map", "obs_order", "body_names", "joint_names", "scale", "offset", "stiffness", "damping", "default_joint_pos"}
+    critical_dict_fields = {"observations", "actions", "commands"}
+    
+    def clean_cfg_recursive(obj, path=""):
         """Recursively clean config, removing None values from lists and ensuring proper types."""
         if isinstance(obj, dict):
             cleaned = {}
             for k, v in obj.items():
-                cleaned_v = clean_cfg_recursive(v)
-                # Skip None values in dicts (except for specific fields that need null)
+                current_path = f"{path}.{k}" if path else k
+                cleaned_v = clean_cfg_recursive(v, current_path)
+                # Always keep critical fields, even if they're None (for joint_ids)
+                # But skip None values for non-critical fields
                 if cleaned_v is not None or k in ["joint_ids"]:  # joint_ids can be None
                     cleaned[k] = cleaned_v
             return cleaned
         elif isinstance(obj, (list, tuple)):
-            # Filter out None values from lists and clean each item
-            filtered = [clean_cfg_recursive(item) for item in obj if item is not None]
-            return filtered
+            # For critical list fields, preserve empty lists and filter only None items
+            # For other lists, filter out None values
+            is_critical = any(field in path for field in critical_list_fields)
+            if is_critical:
+                # For critical fields, filter None but preserve empty lists
+                filtered = [clean_cfg_recursive(item, f"{path}[{i}]") for i, item in enumerate(obj) if item is not None]
+                # If all items were None, return empty list (don't remove the field)
+                return filtered
+            else:
+                # For non-critical fields, filter None values
+                filtered = [clean_cfg_recursive(item, f"{path}[{i}]") for i, item in enumerate(obj) if item is not None]
+                # Only return empty list if original was empty, otherwise return filtered
+                return filtered if len(filtered) > 0 or len(obj) == 0 else []
         elif isinstance(obj, (np.integer, np.floating)):
             return float(obj) if isinstance(obj, np.floating) else int(obj)
         elif isinstance(obj, np.ndarray):
@@ -564,6 +598,14 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     
     # Apply final cleanup
     cfg = clean_cfg_recursive(cfg)
+    
+    # Post-cleanup validation: Ensure critical fields are not empty
+    if "joint_ids_map" in cfg and (not cfg["joint_ids_map"] or len(cfg["joint_ids_map"]) == 0):
+        raise ValueError("CRITICAL: joint_ids_map is empty after cleanup! This will cause deployment to fail.")
+    
+    if "observations" in cfg and "obs_order" in cfg["observations"]:
+        if not cfg["observations"]["obs_order"] or len(cfg["observations"]["obs_order"]) == 0:
+            raise ValueError("CRITICAL: obs_order is empty after cleanup! This will cause deployment to fail.")
     
     # Ensure critical fields are correct
     if "observations" in cfg:
