@@ -47,6 +47,9 @@ def format_value(x):
         return int(x)
     elif isinstance(x, np.floating):
         return float(x)
+    elif isinstance(x, (int, str, bool)):
+        # Handle plain Python int, str, and bool - return as-is
+        return x
     else:
         # For any other type, try to convert or return None
         try:
