@@ -405,8 +405,8 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             params_dict = term_cfg["params"]
             # Fix command_name for velocity_commands/keyboard_velocity_commands
             if deploy_obs_name in ["velocity_commands", "keyboard_velocity_commands"]:
-                if "command_name" not in params_dict or params_dict.get("command_name") is None:
-                    params_dict["command_name"] = "base_velocity"
+                # Always set command_name - it's required for C++ parsing
+                params_dict["command_name"] = "base_velocity"
         
         # Special handling for key_body_pos_b: ensure body_names are exported correctly
         if deploy_obs_name == "key_body_pos_b" and "params" in term_cfg:
@@ -489,11 +489,22 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             elif isinstance(term_cfg["clip"], np.ndarray) and term_cfg["clip"].size == 0:
                 del term_cfg["clip"]
         
-        # Ensure history_length is an integer, not None
-        if "history_length" not in term_cfg or term_cfg.get("history_length") is None:
+        # Ensure history_length is ALWAYS set and is an integer (CRITICAL for deploy)
+        # This must be set for ALL observation terms
+        if "history_length" not in term_cfg:
+            term_cfg["history_length"] = 5 if has_amp_terms else 1
+        elif term_cfg.get("history_length") is None:
             term_cfg["history_length"] = 5 if has_amp_terms else 1
         else:
-            term_cfg["history_length"] = int(term_cfg["history_length"])
+            # Convert to int, ensuring it's never None
+            try:
+                term_cfg["history_length"] = int(term_cfg["history_length"])
+            except (ValueError, TypeError):
+                term_cfg["history_length"] = 5 if has_amp_terms else 1
+        
+        # Final validation - history_length MUST be an integer
+        assert isinstance(term_cfg["history_length"], int), f"history_length must be int, got {type(term_cfg['history_length'])}"
+        assert term_cfg["history_length"] > 0, f"history_length must be > 0, got {term_cfg['history_length']}"
         
         # Ensure scale is not empty
         if "scale" in term_cfg:
@@ -559,36 +570,56 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     cfg = clean_yaml_types(cfg)
     
     # Final cleanup: remove None values and ensure proper types
-    # CRITICAL: Preserve critical fields that must have values (joint_ids_map, obs_order, etc.)
-    critical_list_fields = {"joint_ids_map", "obs_order", "body_names", "joint_names", "scale", "offset", "stiffness", "damping", "default_joint_pos"}
-    critical_dict_fields = {"observations", "actions", "commands"}
+    # CRITICAL: Do NOT modify critical top-level fields like joint_ids_map, obs_order, etc.
+    # These fields are already correctly set above and should not be touched by cleanup
     
-    def clean_cfg_recursive(obj, path=""):
-        """Recursively clean config, removing None values from lists and ensuring proper types."""
+    def clean_cfg_recursive(obj):
+        """Recursively clean config, removing None values from lists and ensuring proper types.
+        NOTE: This function should NOT modify critical top-level fields like joint_ids_map.
+        """
         if isinstance(obj, dict):
             cleaned = {}
             for k, v in obj.items():
-                current_path = f"{path}.{k}" if path else k
-                cleaned_v = clean_cfg_recursive(v, current_path)
-                # Always keep critical fields, even if they're None (for joint_ids)
-                # But skip None values for non-critical fields
-                if cleaned_v is not None or k in ["joint_ids"]:  # joint_ids can be None
-                    cleaned[k] = cleaned_v
+                # Skip cleanup for critical top-level fields - they're already correct
+                if k in ["joint_ids_map", "stiffness", "damping", "default_joint_pos", "step_dt"]:
+                    cleaned[k] = v  # Keep as-is, no cleanup
+                elif k == "observations" and isinstance(v, dict):
+                    # Special handling for observations - preserve obs_order, use_gym_history, and history_length
+                    cleaned_obs = {}
+                    for obs_k, obs_v in v.items():
+                        if obs_k in ["obs_order", "use_gym_history"]:
+                            cleaned_obs[obs_k] = obs_v  # Keep as-is
+                        elif isinstance(obs_v, dict):
+                            # Clean observation term config, but preserve history_length
+                            cleaned_term = {}
+                            for term_k, term_v in obs_v.items():
+                                if term_k == "history_length":
+                                    cleaned_term[term_k] = term_v  # Keep as-is (already validated)
+                                elif term_k == "params" and isinstance(term_v, dict):
+                                    # Clean params but preserve command_name
+                                    cleaned_params = {}
+                                    for param_k, param_v in term_v.items():
+                                        if param_k == "command_name":
+                                            cleaned_params[param_k] = param_v  # Keep as-is
+                                        else:
+                                            cleaned_params[param_k] = clean_cfg_recursive(param_v)
+                                    cleaned_term[term_k] = cleaned_params
+                                else:
+                                    cleaned_term[term_k] = clean_cfg_recursive(term_v)
+                            cleaned_obs[obs_k] = cleaned_term
+                        else:
+                            cleaned_obs[obs_k] = clean_cfg_recursive(obs_v)
+                    cleaned[k] = cleaned_obs
+                else:
+                    cleaned_v = clean_cfg_recursive(v)
+                    # Always keep critical fields, even if they're None (for joint_ids)
+                    if cleaned_v is not None or k in ["joint_ids"]:  # joint_ids can be None
+                        cleaned[k] = cleaned_v
             return cleaned
         elif isinstance(obj, (list, tuple)):
-            # For critical list fields, preserve empty lists and filter only None items
-            # For other lists, filter out None values
-            is_critical = any(field in path for field in critical_list_fields)
-            if is_critical:
-                # For critical fields, filter None but preserve empty lists
-                filtered = [clean_cfg_recursive(item, f"{path}[{i}]") for i, item in enumerate(obj) if item is not None]
-                # If all items were None, return empty list (don't remove the field)
-                return filtered
-            else:
-                # For non-critical fields, filter None values
-                filtered = [clean_cfg_recursive(item, f"{path}[{i}]") for i, item in enumerate(obj) if item is not None]
-                # Only return empty list if original was empty, otherwise return filtered
-                return filtered if len(filtered) > 0 or len(obj) == 0 else []
+            # Filter None values but preserve list structure
+            filtered = [clean_cfg_recursive(item) for item in obj if item is not None]
+            return filtered
         elif isinstance(obj, (np.integer, np.floating)):
             return float(obj) if isinstance(obj, np.floating) else int(obj)
         elif isinstance(obj, np.ndarray):
@@ -596,16 +627,51 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         else:
             return obj
     
-    # Apply final cleanup
+    # Apply final cleanup - but preserve critical fields
     cfg = clean_cfg_recursive(cfg)
     
-    # Post-cleanup validation: Ensure critical fields are not empty
-    if "joint_ids_map" in cfg and (not cfg["joint_ids_map"] or len(cfg["joint_ids_map"]) == 0):
-        raise ValueError("CRITICAL: joint_ids_map is empty after cleanup! This will cause deployment to fail.")
+    # Post-cleanup validation: Ensure critical fields are not empty and have correct types
+    if "joint_ids_map" in cfg:
+        if not isinstance(cfg["joint_ids_map"], list):
+            raise ValueError(f"CRITICAL: joint_ids_map is not a list! Got type: {type(cfg['joint_ids_map'])}")
+        if len(cfg["joint_ids_map"]) == 0:
+            raise ValueError(
+                f"CRITICAL: joint_ids_map is empty after cleanup! This will cause deployment to fail.\n"
+                f"Original joint_ids_map had {len(joint_ids_map)} elements.\n"
+                f"Check that cleanup function is not incorrectly filtering values."
+            )
+        # Validate all elements are integers
+        for i, val in enumerate(cfg["joint_ids_map"]):
+            if not isinstance(val, (int, np.integer)):
+                raise ValueError(f"CRITICAL: joint_ids_map[{i}] is not an integer! Got type: {type(val)}, value: {val}")
     
-    if "observations" in cfg and "obs_order" in cfg["observations"]:
-        if not cfg["observations"]["obs_order"] or len(cfg["observations"]["obs_order"]) == 0:
-            raise ValueError("CRITICAL: obs_order is empty after cleanup! This will cause deployment to fail.")
+    if "observations" in cfg:
+        if "obs_order" in cfg["observations"]:
+            if not isinstance(cfg["observations"]["obs_order"], list):
+                raise ValueError(f"CRITICAL: obs_order is not a list! Got type: {type(cfg['observations']['obs_order'])}")
+            if len(cfg["observations"]["obs_order"]) == 0:
+                raise ValueError("CRITICAL: obs_order is empty after cleanup! This will cause deployment to fail.")
+        
+        # Validate all observation terms have history_length
+        for obs_name, obs_cfg in cfg["observations"].items():
+            if obs_name in ["obs_order", "use_gym_history"]:
+                continue  # Skip metadata fields
+            if isinstance(obs_cfg, dict):
+                if "history_length" not in obs_cfg:
+                    raise ValueError(f"CRITICAL: Observation '{obs_name}' missing history_length!")
+                if not isinstance(obs_cfg["history_length"], int):
+                    raise ValueError(f"CRITICAL: Observation '{obs_name}' history_length is not int! Got: {type(obs_cfg['history_length'])}")
+                if obs_cfg["history_length"] <= 0:
+                    raise ValueError(f"CRITICAL: Observation '{obs_name}' history_length <= 0! Got: {obs_cfg['history_length']}")
+                
+                # Validate velocity_commands has command_name
+                if obs_name in ["velocity_commands", "keyboard_velocity_commands"]:
+                    if "params" not in obs_cfg or not isinstance(obs_cfg["params"], dict):
+                        raise ValueError(f"CRITICAL: Observation '{obs_name}' missing params dict!")
+                    if "command_name" not in obs_cfg["params"]:
+                        raise ValueError(f"CRITICAL: Observation '{obs_name}' missing command_name in params!")
+                    if obs_cfg["params"]["command_name"] != "base_velocity":
+                        raise ValueError(f"CRITICAL: Observation '{obs_name}' command_name is not 'base_velocity'! Got: {obs_cfg['params']['command_name']}")
     
     # Ensure critical fields are correct
     if "observations" in cfg:
