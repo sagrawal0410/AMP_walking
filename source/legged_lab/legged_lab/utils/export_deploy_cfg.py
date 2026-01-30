@@ -546,6 +546,7 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         cfg["observations"]["obs_order"] = filtered_order
 
     # --- save config file ---
+    print(f"\njoint_ids_map result: {joint_ids_map}")
     filename = os.path.join(log_dir, "params", "deploy.yaml")
     if not os.path.exists(os.path.dirname(filename)):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
