@@ -32,15 +32,26 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
         {"e", {0.0f, 0.0f, -0.05f}}   // Turn right (50% max - CRITICAL: no ang curriculum)
     };
     
-    // Get command based on key press - return immediately (no smoothing) to match training behavior
-    // During training, generated_commands returns instantaneous values, so we must match that
-    std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
+    // Maintain last command state (static) to avoid jumping to zero when no key is pressed
+    // This matches training behavior where commands persist until changed
+    static std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
+    static std::string last_processed_key = "";
     
-    if (key_commands.find(key) != key_commands.end())
+    // Only update command when a NEW valid key is pressed (not on every call)
+    // This ensures consistency when observation is called multiple times per step
+    if (!key.empty() && key != last_processed_key && key_commands.find(key) != key_commands.end())
     {
         cmd = key_commands[key];
-        spdlog::info("Command: [{:.3f}, {:.3f}, {:.3f}]", cmd[0], cmd[1], cmd[2]);
+        last_processed_key = key;
+        spdlog::info("Command updated: [{:.3f}, {:.3f}, {:.3f}]", cmd[0], cmd[1], cmd[2]);
     }
+    else if (key.empty())
+    {
+        // When no key is pressed, clear the last processed key but keep the command
+        // This allows the same key to be processed again if pressed later
+        last_processed_key = "";
+    }
+    // If no key pressed or same key, cmd retains its previous value (don't reset to zero)
     
     // Clamp to training ranges (matching velocity_commands behavior)
     cmd[0] = std::clamp(cmd[0], cfg["lin_vel_x"][0].as<float>(), cfg["lin_vel_x"][1].as<float>());
