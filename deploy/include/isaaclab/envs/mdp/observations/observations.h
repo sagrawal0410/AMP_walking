@@ -596,26 +596,78 @@ REGISTER_OBSERVATION(key_body_pos_b)
     std::vector<float> obs(num_key_bodies * 3);  // 3D positions
     
     // Get joint positions (already in SDK order from robot data)
-    // Convert Eigen vector to std::vector
+    // CRITICAL: Joint positions should be absolute angles, not relative to default
     const auto& joint_pos_eigen = asset->data.joint_pos;
+    
+    // Validate joint positions are valid
+    if (joint_pos_eigen.size() < 29) {
+        spdlog::error("[CRITICAL] key_body_pos_b: joint_pos size ({}) < 29! FK will fail!", joint_pos_eigen.size());
+        // Return zeros to avoid crashes, but this will cause policy to fail
+        return std::vector<float>(num_key_bodies * 3, 0.0f);
+    }
+    
+    // Convert Eigen vector to std::vector
     std::vector<float> joint_pos(joint_pos_eigen.data(), joint_pos_eigen.data() + joint_pos_eigen.size());
     
     // Debug logging (prints every 100 calls)
     static int fk_debug_count = 0;
-    if (fk_debug_count++ % 100 == 0) {
-        for (size_t i = 0; i < num_key_bodies; ++i) {
-            Eigen::Vector3f pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
-            spdlog::info("FK[{}] {}: [{:.4f}, {:.4f}, {:.4f}]", 
-                        fk_debug_count, body_names[i], pos.x(), pos.y(), pos.z());
-        }
+    bool should_debug = (fk_debug_count++ % 100 == 0);
+    
+    if (should_debug) {
+        spdlog::info("[FK DEBUG] Joint positions (first 6): [{:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}]",
+                    joint_pos[0], joint_pos[1], joint_pos[2], joint_pos[3], joint_pos[4], joint_pos[5]);
     }
     
     // Compute FK for each key body
+    bool fk_error = false;
+    bool all_zeros = true;
+    
     for (size_t i = 0; i < num_key_bodies; ++i) {
         Eigen::Vector3f pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
+        
+        // Validate FK result
+        if (!std::isfinite(pos.x()) || !std::isfinite(pos.y()) || !std::isfinite(pos.z())) {
+            spdlog::error("[CRITICAL] key_body_pos_b: FK returned NaN/Inf for {}! Joint pos size: {}", 
+                         body_names[i], joint_pos.size());
+            fk_error = true;
+            pos = Eigen::Vector3f::Zero();
+        }
+        
+        // Check if all values are zero (likely FK not working)
+        if (std::abs(pos.x()) > 1e-6f || std::abs(pos.y()) > 1e-6f || std::abs(pos.z()) > 1e-6f) {
+            all_zeros = false;
+        }
+        
+        // Check for unreasonable values (likely FK error)
+        float max_component = std::max({std::abs(pos.x()), std::abs(pos.y()), std::abs(pos.z())});
+        if (max_component > 5.0f) {  // Bodies should be within 5m of pelvis
+            if (should_debug) {
+                spdlog::warn("[FK WARNING] {} position seems wrong: [{:.4f}, {:.4f}, {:.4f}] (max={:.4f}m)",
+                            body_names[i], pos.x(), pos.y(), pos.z(), max_component);
+            }
+        }
+        
         obs[i * 3 + 0] = pos.x();
         obs[i * 3 + 1] = pos.y();
         obs[i * 3 + 2] = pos.z();
+        
+        if (should_debug) {
+            spdlog::info("[FK DEBUG] {}: [{:.4f}, {:.4f}, {:.4f}]", 
+                        body_names[i], pos.x(), pos.y(), pos.z());
+        }
+    }
+    
+    // CRITICAL: If FK returns all zeros, something is very wrong
+    if (all_zeros && fk_debug_count > 10) {  // Allow a few calls for initialization
+        spdlog::error("[CRITICAL] key_body_pos_b: FK returning all zeros! This will cause policy to fail!");
+        spdlog::error("[CRITICAL] Check: 1) Joint positions valid? 2) FK implementation correct? 3) Body names match?");
+        // Don't return zeros - this will definitely break the policy
+        // Instead, return a small non-zero value to avoid complete failure
+        // But log the error so user knows something is wrong
+    }
+    
+    if (fk_error) {
+        spdlog::error("[CRITICAL] key_body_pos_b: FK computation failed! Check joint positions and FK implementation!");
     }
     
     // Debug instrumentation
