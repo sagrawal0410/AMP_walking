@@ -148,16 +148,42 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
 
 void State_RLBase::run()
 {
+    // Optional action smoothing to reduce jitter (0.0 = no smoothing, 1.0 = full smoothing)
+    // Lower values = more responsive but potentially more jittery
+    // Higher values = smoother but potentially slower response
+    static const float ACTION_SMOOTHING = 0.0f;  // Set to 0.2-0.3 to reduce jitter
+    static std::vector<float> smoothed_action;
+    
     auto action = env->action_manager->processed_actions();
+    
+    // Initialize smoothed action on first call
+    if (smoothed_action.empty()) {
+        smoothed_action.resize(action.size());
+        for (size_t i = 0; i < action.size(); ++i) {
+            smoothed_action[i] = action[i];
+        }
+    }
+    
     for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
-        lowcmd->msg_.motor_cmd()[env->robot->data.joint_ids_map[i]].q() = action[i];
         float action_val = action[i];
         int motor_idx = env->robot->data.joint_ids_map[i];
+        
+        // Validate action
         if(!std::isfinite(action_val)) {
             spdlog::error("Invalid action[{}]: {} (NaN/Inf detected)! Using current position.", i, action_val);
             action_val = lowstate->msg_.motor_state()[motor_idx].q();
         }
-        action_val = std::clamp(action_val, -1.0f, 1.0f);
+        
+        // Apply smoothing if enabled
+        if (ACTION_SMOOTHING > 0.0f && i < smoothed_action.size()) {
+            smoothed_action[i] = ACTION_SMOOTHING * smoothed_action[i] + (1.0f - ACTION_SMOOTHING) * action_val;
+            action_val = smoothed_action[i];
+        }
+        
+        // Clamp to reasonable joint position limits (radians, not [-1,1]!)
+        // These are approximate limits - adjust based on actual robot limits
+        action_val = std::clamp(action_val, -3.14f, 3.14f);
+        
         lowcmd->msg_.motor_cmd()[motor_idx].q() = action_val;
     }
 }

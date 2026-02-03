@@ -568,6 +568,11 @@ REGISTER_OBSERVATION(key_body_pos_b)
     // Implementation matches Python: key_body_pos_b in deepmimic/mdp/observations.py
     // Uses Forward Kinematics computed from joint positions
     
+    // DIAGNOSTIC FLAG: Set to true to use fixed default positions instead of FK
+    // This helps isolate whether FK errors are causing instability
+    // If robot is stable with this = true, then FK is the problem
+    static const bool USE_DEFAULT_POSITIONS = false;  // Set to true to test without FK
+    
     auto & asset = env->robot;
     
     // Get body names from params
@@ -622,8 +627,35 @@ REGISTER_OBSERVATION(key_body_pos_b)
     bool fk_error = false;
     bool all_zeros = true;
     
+    // Default positions at zero pose (pre-computed from Isaac Lab)
+    // These are used for diagnostic testing when USE_DEFAULT_POSITIONS = true
+    static const std::map<std::string, Eigen::Vector3f> default_body_positions = {
+        {"left_ankle_roll_link", Eigen::Vector3f(0.0f, 0.1165f, -0.756f)},
+        {"right_ankle_roll_link", Eigen::Vector3f(0.0f, -0.1165f, -0.756f)},
+        {"left_wrist_yaw_link", Eigen::Vector3f(0.188f, 0.244f, 0.054f)},
+        {"right_wrist_yaw_link", Eigen::Vector3f(0.188f, -0.244f, 0.054f)},
+        {"left_shoulder_roll_link", Eigen::Vector3f(0.0f, 0.138f, 0.292f)},
+        {"right_shoulder_roll_link", Eigen::Vector3f(0.0f, -0.138f, 0.292f)},
+    };
+    
     for (size_t i = 0; i < num_key_bodies; ++i) {
-        Eigen::Vector3f pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
+        Eigen::Vector3f pos;
+        
+        if (USE_DEFAULT_POSITIONS) {
+            // Use fixed default positions for diagnostic testing
+            auto it = default_body_positions.find(body_names[i]);
+            if (it != default_body_positions.end()) {
+                pos = it->second;
+            } else {
+                pos = Eigen::Vector3f::Zero();
+            }
+            if (should_debug && i == 0) {
+                spdlog::warn("[DIAGNOSTIC] Using DEFAULT positions instead of FK!");
+            }
+        } else {
+            // Normal FK computation
+            pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
+        }
         
         // Validate FK result
         if (!std::isfinite(pos.x()) || !std::isfinite(pos.y()) || !std::isfinite(pos.z())) {
