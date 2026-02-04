@@ -530,10 +530,12 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     # Set use_gym_history and obs_order for AMP policies
     # Note: ObservationManager receives cfg["observations"], so these must be inside observations dict
     if has_amp_terms:
-        # Set use_gym_history to false (concatenated history, not interleaved)
-        # This ensures history is concatenated per term: [term1_h0, term1_h1, ..., term1_h4, term2_h0, ...]
-        # Instead of interleaved: [term1_h0, term2_h0, ..., term1_h1, term2_h1, ...]
-        cfg["observations"]["use_gym_history"] = False
+        # CRITICAL: Set use_gym_history to TRUE to match training!
+        # Training uses concatenate_terms=True which produces gym-style (interleaved) history:
+        #   [all_terms_at_t0, all_terms_at_t1, ..., all_terms_at_t4]
+        # NOT per-term history:
+        #   [term1_all_history, term2_all_history, ...]
+        cfg["observations"]["use_gym_history"] = True
         # Store observation order explicitly (critical for AMP policies) - filter out None values and ensure strings
         filtered_order = [str(x) for x in obs_order if x is not None and str(x) != "None"]
         if not filtered_order or len(filtered_order) == 0:
@@ -689,8 +691,9 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
             cfg["observations"]["obs_order"] = [str(x) for x in cfg["observations"]["obs_order"] if x is not None and str(x) != "None"]
         
         # Ensure use_gym_history is boolean, not None
+        # Default to True to match training's concatenate_terms=True behavior
         if "use_gym_history" in cfg["observations"] and cfg["observations"]["use_gym_history"] is None:
-            cfg["observations"]["use_gym_history"] = False
+            cfg["observations"]["use_gym_history"] = True
         
         # Remove clip: null from all observation terms
         for obs_name, obs_cfg in cfg["observations"].items():
