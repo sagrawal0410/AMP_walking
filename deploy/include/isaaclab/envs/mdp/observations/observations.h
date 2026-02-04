@@ -543,6 +543,29 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     auto & asset = env->robot;
     auto & root_quat_w = asset->data.root_quat_w;
     
+    // CRITICAL DEBUG: Print raw quaternion from IMU to verify order
+    static int rot_debug_count = 0;
+    bool should_debug_rot = (rot_debug_count++ % 100 == 0);
+    
+    if (should_debug_rot) {
+        spdlog::info("[ROT DEBUG] Raw IMU quaternion (wxyz): w={:.4f}, x={:.4f}, y={:.4f}, z={:.4f}",
+                    root_quat_w.w(), root_quat_w.x(), root_quat_w.y(), root_quat_w.z());
+        
+        // Check if quaternion is normalized
+        float quat_norm = root_quat_w.norm();
+        if (std::abs(quat_norm - 1.0f) > 0.01f) {
+            spdlog::warn("[ROT DEBUG] WARNING: Quaternion not normalized! ||q||={:.4f}", quat_norm);
+        }
+        
+        // For an upright robot, we expect:
+        // - quat ≈ (1, 0, 0, 0) or (w≈1, x≈0, y≈0, z≈small)
+        // If we see w≈0 and x/y/z large, the order might be wrong (SDK might use xyzw)
+        if (std::abs(root_quat_w.w()) < 0.5f && rot_debug_count < 10) {
+            spdlog::warn("[ROT DEBUG] WARNING: w component small ({:.4f})! IMU quaternion order might be (x,y,z,w) not (w,x,y,z)!", root_quat_w.w());
+            spdlog::warn("[ROT DEBUG] If robot is upright, expected w≈1, but got w={:.4f}", root_quat_w.w());
+        }
+    }
+    
     // Extract yaw quaternion (heading only)
     float yaw = std::atan2(2.0f * (root_quat_w.w() * root_quat_w.z() + root_quat_w.x() * root_quat_w.y()),
                            1.0f - 2.0f * (root_quat_w.y() * root_quat_w.y() + root_quat_w.z() * root_quat_w.z()));
@@ -560,6 +583,19 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     // Python uses columns 0 and 2: tan_vec = root_rotm_local[:, 0], norm_vec = root_rotm_local[:, 2]
     Eigen::Vector3f tan_vec = rotm_local.col(0);  // First column
     Eigen::Vector3f norm_vec = rotm_local.col(2);  // Third column
+    
+    if (should_debug_rot) {
+        spdlog::info("[ROT DEBUG] After yaw removal: tan=[{:.4f},{:.4f},{:.4f}], norm=[{:.4f},{:.4f},{:.4f}]",
+                    tan_vec.x(), tan_vec.y(), tan_vec.z(),
+                    norm_vec.x(), norm_vec.y(), norm_vec.z());
+        
+        // For upright robot, expected:
+        // tan ≈ [1, 0, 0] (forward)
+        // norm ≈ [0, 0, 1] (up)
+        if (std::abs(tan_vec.x() - 1.0f) > 0.3f || std::abs(norm_vec.z() - 1.0f) > 0.3f) {
+            spdlog::warn("[ROT DEBUG] WARNING: For upright robot, expected tan≈[1,0,0], norm≈[0,0,1]");
+        }
+    }
     
     // Concatenate: [tan.x, tan.y, tan.z, norm.x, norm.y, norm.z]
     std::vector<float> obs(6);

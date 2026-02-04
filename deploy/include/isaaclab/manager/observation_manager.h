@@ -8,6 +8,7 @@
 #include <unordered_set>
 #include <map>
 #include <algorithm>
+#include <limits>
 #include <spdlog/spdlog.h>
 #include "isaaclab/manager/manager_term_cfg.h"
 #include "isaaclab/utils/debug_utils.h"
@@ -72,6 +73,40 @@ public:
         // Add current observation to history buffers
         for(auto & term : group_terms) {
             term.add(term.func(this->env, term.params));
+        }
+        
+        // CRITICAL: Print observation values for first 10 steps to diagnose startup behavior
+        static int startup_debug_count = 0;
+        if (startup_debug_count < 10) {
+            startup_debug_count++;
+            spdlog::info("[STARTUP DEBUG] Step {}/10 ========================================", startup_debug_count);
+            for (size_t i = 0; i < group_terms.size(); ++i) {
+                const auto& term = group_terms[i];
+                std::string term_name = (i < obs_order_.size()) ? obs_order_[i] : "unknown";
+                auto current_obs = term.get(term.history_length - 1);  // Get newest observation
+                
+                spdlog::info("[STARTUP DEBUG] Term[{}] '{}': size={}", i, term_name, current_obs.size());
+                
+                // Print first few values
+                if (current_obs.size() >= 3) {
+                    spdlog::info("[STARTUP DEBUG]   First 3 values: [{:.4f}, {:.4f}, {:.4f}]",
+                                current_obs[0], current_obs[1], current_obs[2]);
+                }
+                
+                // Print stats
+                float min_val = std::numeric_limits<float>::max();
+                float max_val = std::numeric_limits<float>::lowest();
+                float sum = 0.0f;
+                for (float v : current_obs) {
+                    min_val = std::min(min_val, v);
+                    max_val = std::max(max_val, v);
+                    sum += v;
+                }
+                float mean = current_obs.empty() ? 0.0f : sum / current_obs.size();
+                spdlog::info("[STARTUP DEBUG]   Stats: min={:.4f}, max={:.4f}, mean={:.4f}",
+                            min_val, max_val, mean);
+            }
+            spdlog::info("[STARTUP DEBUG] ================================================");
         }
 
         // Debug: Print history buffer status
