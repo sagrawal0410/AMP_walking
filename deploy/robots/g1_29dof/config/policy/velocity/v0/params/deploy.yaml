@@ -66,6 +66,6 @@ observations:
     scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
       1.0, 1.0, 1.0, 1.0]
     history_length: 5
-  use_gym_history: true
+  use_gym_history: false
   obs_order: [base_ang_vel, root_local_rot_tan_norm, keyboard_velocity_commands, joint_pos,
     joint_vel, last_action, key_body_pos_b]
