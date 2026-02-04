@@ -67,19 +67,36 @@ inline Transform jointTransform(const Eigen::Vector3f& axis, float angle) {
 
 // ============================================================================
 // G1 29-DOF Robot Kinematic Structure (from g1_29dof.xml)
-// Joint order matches SDK order in deploy.yaml
 // ============================================================================
-
-// Joint indices in SDK order (from deploy.yaml joint_ids_map)
-// SDK order: [left_hip_pitch, left_hip_roll, left_hip_yaw, left_knee, left_ankle_pitch, left_ankle_roll,
-//             right_hip_pitch, right_hip_roll, right_hip_yaw, right_knee, right_ankle_pitch, right_ankle_roll,
-//             waist_yaw, waist_roll, waist_pitch,
-//             left_shoulder_pitch, left_shoulder_roll, left_shoulder_yaw, left_elbow, left_wrist_roll, left_wrist_pitch, left_wrist_yaw,
-//             right_shoulder_pitch, right_shoulder_roll, right_shoulder_yaw, right_elbow, right_wrist_roll, right_wrist_pitch, right_wrist_yaw]
+//
+// IMPORTANT: joint_pos is in POLICY order (after joint_ids_map remapping), NOT SDK order!
+//
+// joint_ids_map: [0, 6, 12, 1, 7, 13, 2, 8, 14, 3, 9, 15, 22, 4, 10, 16, 23, 5, 11, 17, 24, 18, 25, 19, 26, 20, 27, 21, 28]
+//
+// SDK order (physical robot):
+//   Left leg:  0=hip_pitch, 1=hip_roll, 2=hip_yaw, 3=knee, 4=ankle_pitch, 5=ankle_roll
+//   Right leg: 6=hip_pitch, 7=hip_roll, 8=hip_yaw, 9=knee, 10=ankle_pitch, 11=ankle_roll
+//   Waist: 12=yaw, 13=roll, 14=pitch
+//   Left arm:  15=shoulder_pitch, 16=shoulder_roll, 17=shoulder_yaw, 18=elbow, 19=wrist_roll, 20=wrist_pitch, 21=wrist_yaw
+//   Right arm: 22=shoulder_pitch, 23=shoulder_roll, 24=shoulder_yaw, 25=elbow, 26=wrist_roll, 27=wrist_pitch, 28=wrist_yaw
+//
+// Policy order (after joint_ids_map remapping):
+//   [0]=SDK0, [1]=SDK6, [2]=SDK12, [3]=SDK1, [4]=SDK7, [5]=SDK13, [6]=SDK2, [7]=SDK8, [8]=SDK14,
+//   [9]=SDK3, [10]=SDK9, [11]=SDK15, [12]=SDK22, [13]=SDK4, [14]=SDK10, [15]=SDK16, [16]=SDK23,
+//   [17]=SDK5, [18]=SDK11, [19]=SDK17, [20]=SDK24, [21]=SDK18, [22]=SDK25, [23]=SDK19, [24]=SDK26,
+//   [25]=SDK20, [26]=SDK27, [27]=SDK21, [28]=SDK28
+//
+// Inverse mapping (SDK index -> Policy index):
+//   SDK 0->0, 1->3, 2->6, 3->9, 4->13, 5->17 (left leg)
+//   SDK 6->1, 7->4, 8->7, 9->10, 10->14, 11->18 (right leg)
+//   SDK 12->2, 13->5, 14->8 (waist)
+//   SDK 15->11, 16->15, 17->19, 18->21, 19->23, 20->25, 21->27 (left arm)
+//   SDK 22->12, 23->16, 24->20, 25->22, 26->24, 27->26, 28->28 (right arm)
+// ============================================================================
 
 inline Eigen::Vector3f computeKeyBodyPosition_G1(
     const std::string& body_name,
-    const std::vector<float>& joint_pos  // Joint positions in SDK order
+    const std::vector<float>& joint_pos  // Joint positions in POLICY order (after joint_ids_map)
 ) {
     // Joint axes (from XML)
     const Eigen::Vector3f AXIS_X(1.0f, 0.0f, 0.0f);
@@ -126,41 +143,48 @@ inline Eigen::Vector3f computeKeyBodyPosition_G1(
     auto T_right_wrist_roll_to_pitch = makeTransform(Eigen::Vector3f(0.038f, 0.0f, 0.0f));
     auto T_right_wrist_pitch_to_yaw = makeTransform(Eigen::Vector3f(0.046f, 0.0f, 0.0f));
     
-    // Extract joint angles (SDK order indices)
-    // Left leg: 0-5, Right leg: 6-11, Waist: 12-14, Left arm: 15-21, Right arm: 22-28
-    float left_hip_pitch = joint_pos.size() > 0 ? joint_pos[0] : 0.0f;
-    float left_hip_roll = joint_pos.size() > 1 ? joint_pos[1] : 0.0f;
-    float left_hip_yaw = joint_pos.size() > 2 ? joint_pos[2] : 0.0f;
-    float left_knee = joint_pos.size() > 3 ? joint_pos[3] : 0.0f;
-    float left_ankle_pitch = joint_pos.size() > 4 ? joint_pos[4] : 0.0f;
-    float left_ankle_roll = joint_pos.size() > 5 ? joint_pos[5] : 0.0f;
+    // Extract joint angles using POLICY order indices (NOT SDK order!)
+    // The joint_pos array is in policy order after joint_ids_map remapping.
+    // We use the inverse mapping: SDK index -> Policy index
+    // 
+    // Left leg (SDK 0-5 -> Policy 0,3,6,9,13,17):
+    float left_hip_pitch = joint_pos.size() > 0 ? joint_pos[0] : 0.0f;    // SDK 0 -> Policy 0
+    float left_hip_roll = joint_pos.size() > 3 ? joint_pos[3] : 0.0f;     // SDK 1 -> Policy 3
+    float left_hip_yaw = joint_pos.size() > 6 ? joint_pos[6] : 0.0f;      // SDK 2 -> Policy 6
+    float left_knee = joint_pos.size() > 9 ? joint_pos[9] : 0.0f;         // SDK 3 -> Policy 9
+    float left_ankle_pitch = joint_pos.size() > 13 ? joint_pos[13] : 0.0f; // SDK 4 -> Policy 13
+    float left_ankle_roll = joint_pos.size() > 17 ? joint_pos[17] : 0.0f;  // SDK 5 -> Policy 17
     
-    float right_hip_pitch = joint_pos.size() > 6 ? joint_pos[6] : 0.0f;
-    float right_hip_roll = joint_pos.size() > 7 ? joint_pos[7] : 0.0f;
-    float right_hip_yaw = joint_pos.size() > 8 ? joint_pos[8] : 0.0f;
-    float right_knee = joint_pos.size() > 9 ? joint_pos[9] : 0.0f;
-    float right_ankle_pitch = joint_pos.size() > 10 ? joint_pos[10] : 0.0f;
-    float right_ankle_roll = joint_pos.size() > 11 ? joint_pos[11] : 0.0f;
+    // Right leg (SDK 6-11 -> Policy 1,4,7,10,14,18):
+    float right_hip_pitch = joint_pos.size() > 1 ? joint_pos[1] : 0.0f;   // SDK 6 -> Policy 1
+    float right_hip_roll = joint_pos.size() > 4 ? joint_pos[4] : 0.0f;    // SDK 7 -> Policy 4
+    float right_hip_yaw = joint_pos.size() > 7 ? joint_pos[7] : 0.0f;     // SDK 8 -> Policy 7
+    float right_knee = joint_pos.size() > 10 ? joint_pos[10] : 0.0f;      // SDK 9 -> Policy 10
+    float right_ankle_pitch = joint_pos.size() > 14 ? joint_pos[14] : 0.0f; // SDK 10 -> Policy 14
+    float right_ankle_roll = joint_pos.size() > 18 ? joint_pos[18] : 0.0f;  // SDK 11 -> Policy 18
     
-    float waist_yaw = joint_pos.size() > 12 ? joint_pos[12] : 0.0f;
-    float waist_roll = joint_pos.size() > 13 ? joint_pos[13] : 0.0f;
-    float waist_pitch = joint_pos.size() > 14 ? joint_pos[14] : 0.0f;
+    // Waist (SDK 12-14 -> Policy 2,5,8):
+    float waist_yaw = joint_pos.size() > 2 ? joint_pos[2] : 0.0f;         // SDK 12 -> Policy 2
+    float waist_roll = joint_pos.size() > 5 ? joint_pos[5] : 0.0f;        // SDK 13 -> Policy 5
+    float waist_pitch = joint_pos.size() > 8 ? joint_pos[8] : 0.0f;       // SDK 14 -> Policy 8
     
-    float left_shoulder_pitch = joint_pos.size() > 15 ? joint_pos[15] : 0.0f;
-    float left_shoulder_roll = joint_pos.size() > 16 ? joint_pos[16] : 0.0f;
-    float left_shoulder_yaw = joint_pos.size() > 17 ? joint_pos[17] : 0.0f;
-    float left_elbow = joint_pos.size() > 18 ? joint_pos[18] : 0.0f;
-    float left_wrist_roll = joint_pos.size() > 19 ? joint_pos[19] : 0.0f;
-    float left_wrist_pitch = joint_pos.size() > 20 ? joint_pos[20] : 0.0f;
-    float left_wrist_yaw = joint_pos.size() > 21 ? joint_pos[21] : 0.0f;
+    // Left arm (SDK 15-21 -> Policy 11,15,19,21,23,25,27):
+    float left_shoulder_pitch = joint_pos.size() > 11 ? joint_pos[11] : 0.0f;  // SDK 15 -> Policy 11
+    float left_shoulder_roll = joint_pos.size() > 15 ? joint_pos[15] : 0.0f;   // SDK 16 -> Policy 15
+    float left_shoulder_yaw = joint_pos.size() > 19 ? joint_pos[19] : 0.0f;    // SDK 17 -> Policy 19
+    float left_elbow = joint_pos.size() > 21 ? joint_pos[21] : 0.0f;           // SDK 18 -> Policy 21
+    float left_wrist_roll = joint_pos.size() > 23 ? joint_pos[23] : 0.0f;      // SDK 19 -> Policy 23
+    float left_wrist_pitch = joint_pos.size() > 25 ? joint_pos[25] : 0.0f;     // SDK 20 -> Policy 25
+    float left_wrist_yaw = joint_pos.size() > 27 ? joint_pos[27] : 0.0f;       // SDK 21 -> Policy 27
     
-    float right_shoulder_pitch = joint_pos.size() > 22 ? joint_pos[22] : 0.0f;
-    float right_shoulder_roll = joint_pos.size() > 23 ? joint_pos[23] : 0.0f;
-    float right_shoulder_yaw = joint_pos.size() > 24 ? joint_pos[24] : 0.0f;
-    float right_elbow = joint_pos.size() > 25 ? joint_pos[25] : 0.0f;
-    float right_wrist_roll = joint_pos.size() > 26 ? joint_pos[26] : 0.0f;
-    float right_wrist_pitch = joint_pos.size() > 27 ? joint_pos[27] : 0.0f;
-    float right_wrist_yaw = joint_pos.size() > 28 ? joint_pos[28] : 0.0f;
+    // Right arm (SDK 22-28 -> Policy 12,16,20,22,24,26,28):
+    float right_shoulder_pitch = joint_pos.size() > 12 ? joint_pos[12] : 0.0f; // SDK 22 -> Policy 12
+    float right_shoulder_roll = joint_pos.size() > 16 ? joint_pos[16] : 0.0f;  // SDK 23 -> Policy 16
+    float right_shoulder_yaw = joint_pos.size() > 20 ? joint_pos[20] : 0.0f;   // SDK 24 -> Policy 20
+    float right_elbow = joint_pos.size() > 22 ? joint_pos[22] : 0.0f;          // SDK 25 -> Policy 22
+    float right_wrist_roll = joint_pos.size() > 24 ? joint_pos[24] : 0.0f;     // SDK 26 -> Policy 24
+    float right_wrist_pitch = joint_pos.size() > 26 ? joint_pos[26] : 0.0f;    // SDK 27 -> Policy 26
+    float right_wrist_yaw = joint_pos.size() > 28 ? joint_pos[28] : 0.0f;      // SDK 28 -> Policy 28
     
     Transform T_result;
     
@@ -619,8 +643,17 @@ REGISTER_OBSERVATION(key_body_pos_b)
     bool should_debug = (fk_debug_count++ % 100 == 0);
     
     if (should_debug) {
-        spdlog::info("[FK DEBUG] Joint positions (first 6): [{:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}]",
-                    joint_pos[0], joint_pos[1], joint_pos[2], joint_pos[3], joint_pos[4], joint_pos[5]);
+        // Print joint positions in policy order with joint names for verification
+        // Policy order: [0]=L_hip_p, [1]=R_hip_p, [2]=waist_y, [3]=L_hip_r, [4]=R_hip_r, [5]=waist_r
+        spdlog::info("[FK DEBUG] Joint positions in POLICY order:");
+        spdlog::info("[FK DEBUG]   [0] L_hip_pitch={:.4f}, [1] R_hip_pitch={:.4f}, [2] waist_yaw={:.4f}",
+                    joint_pos[0], joint_pos[1], joint_pos[2]);
+        spdlog::info("[FK DEBUG]   [3] L_hip_roll={:.4f}, [4] R_hip_roll={:.4f}, [5] waist_roll={:.4f}",
+                    joint_pos[3], joint_pos[4], joint_pos[5]);
+        spdlog::info("[FK DEBUG]   Left leg: hip_p[0]={:.3f}, hip_r[3]={:.3f}, hip_y[6]={:.3f}, knee[9]={:.3f}, ank_p[13]={:.3f}, ank_r[17]={:.3f}",
+                    joint_pos[0], joint_pos[3], joint_pos[6], joint_pos[9], joint_pos[13], joint_pos[17]);
+        spdlog::info("[FK DEBUG]   Right leg: hip_p[1]={:.3f}, hip_r[4]={:.3f}, hip_y[7]={:.3f}, knee[10]={:.3f}, ank_p[14]={:.3f}, ank_r[18]={:.3f}",
+                    joint_pos[1], joint_pos[4], joint_pos[7], joint_pos[10], joint_pos[14], joint_pos[18]);
     }
     
     // Compute FK for each key body

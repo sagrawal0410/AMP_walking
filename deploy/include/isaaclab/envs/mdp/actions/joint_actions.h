@@ -17,78 +17,29 @@ public:
     JointAction(YAML::Node cfg, ManagerBasedRLEnv* env)
     :ActionTerm(cfg, env)
     {
-        spdlog::debug("JointAction: Parsing config...");
-        
-        // Parse joint_ids - if not specified, null, or not a sequence, use all joints
-        // Extra defensive: also check IsSequence() to handle yaml-cpp edge cases
-        if(cfg["joint_ids"].IsDefined() && !cfg["joint_ids"].IsNull() && cfg["joint_ids"].IsSequence()) {
-            spdlog::debug("JointAction: joint_ids defined as sequence, parsing as vector<int>...");
+        if(cfg["joint_ids"].IsDefined() && !cfg["joint_ids"].IsNull()) {
             try {
                 _joint_ids = cfg["joint_ids"].as<std::vector<int>>();
                 _action_dim = _joint_ids.size();
-                spdlog::debug("JointAction: Parsed {} joint_ids", _action_dim);
             } catch(const std::exception& e) {
                 // If parsing fails, use all joints
                 spdlog::warn("Failed to parse joint_ids, using all joints: {}", e.what());
                 _action_dim = env->robot->data.joint_ids_map.size();
             }
         } else {
-            if(cfg["joint_ids"].IsDefined()) {
-                spdlog::debug("JointAction: joint_ids defined but is null or not a sequence (type={}), using all joints", 
-                             cfg["joint_ids"].Type());
-            } else {
-                spdlog::debug("JointAction: joint_ids not defined, using all joints");
-            }
             _action_dim = env->robot->data.joint_ids_map.size();
-            spdlog::debug("JointAction: Using all {} joints", _action_dim);
         }
-        
         _raw_actions.resize(_action_dim, 0.0f);
         _processed_actions.resize(_action_dim, 0.0f);
-        
-        // Parse scale - must be a sequence of floats
-        try {
-            if(cfg["scale"].IsDefined() && !cfg["scale"].IsNull() && cfg["scale"].IsSequence()) {
-                spdlog::debug("JointAction: Parsing scale...");
-                _scale = cfg["scale"].as<std::vector<float>>();
-                spdlog::debug("JointAction: Parsed {} scale values", _scale.size());
-            } else if(cfg["scale"].IsDefined() && !cfg["scale"].IsNull()) {
-                spdlog::warn("JointAction: scale defined but not a sequence (type={}), ignoring", cfg["scale"].Type());
-            }
-        } catch(const std::exception& e) {
-            spdlog::error("Failed to parse scale: {}", e.what());
-            throw;
+        if(cfg["scale"].IsDefined() && !cfg["scale"].IsNull()) {
+            _scale = cfg["scale"].as<std::vector<float>>();
         }
-        
-        // Parse offset - must be a sequence of floats
-        try {
-            if(cfg["offset"].IsDefined() && !cfg["offset"].IsNull() && cfg["offset"].IsSequence()) {
-                spdlog::debug("JointAction: Parsing offset...");
-                _offset = cfg["offset"].as<std::vector<float>>();
-                spdlog::debug("JointAction: Parsed {} offset values", _offset.size());
-            } else if(cfg["offset"].IsDefined() && !cfg["offset"].IsNull()) {
-                spdlog::warn("JointAction: offset defined but not a sequence (type={}), ignoring", cfg["offset"].Type());
-            }
-        } catch(const std::exception& e) {
-            spdlog::error("Failed to parse offset: {}", e.what());
-            throw;
+        if(cfg["offset"].IsDefined() && !cfg["offset"].IsNull()) {
+            _offset = cfg["offset"].as<std::vector<float>>();
         }
-        
-        // Parse clip - must be a sequence of sequences of floats
-        try {
-            if(cfg["clip"].IsDefined() && !cfg["clip"].IsNull() && cfg["clip"].IsSequence()) {
-                spdlog::debug("JointAction: Parsing clip...");
-                _clip = cfg["clip"].as<std::vector<std::vector<float> >>();
-                spdlog::debug("JointAction: Parsed {} clip entries", _clip.size());
-            } else if(cfg["clip"].IsDefined() && !cfg["clip"].IsNull()) {
-                spdlog::warn("JointAction: clip defined but not a sequence (type={}), ignoring", cfg["clip"].Type());
-            }
-        } catch(const std::exception& e) {
-            spdlog::error("Failed to parse clip: {}", e.what());
-            throw;
+        if(cfg["clip"].IsDefined() && !cfg["clip"].IsNull()) {
+            _clip = cfg["clip"].as<std::vector<std::vector<float> >>();
         }
-        
-        spdlog::debug("JointAction: Config parsing complete");
     }
 
     virtual void process_actions(std::vector<float> actions)
@@ -110,6 +61,45 @@ public:
         {
             for(int i(0); i<_action_dim; ++i) {
                 _processed_actions[i] = std::clamp(_processed_actions[i], _clip[i][0], _clip[i][1]);
+            }
+        }
+        
+        // Debug: Print action statistics every 100 calls
+        static int action_debug_count = 0;
+        if (action_debug_count++ % 100 == 0) {
+            // Check raw actions for saturation
+            float max_raw = 0.0f;
+            int saturated_count = 0;
+            for (size_t i = 0; i < _raw_actions.size(); ++i) {
+                max_raw = std::max(max_raw, std::abs(_raw_actions[i]));
+                if (std::abs(_raw_actions[i]) > 0.95f) saturated_count++;
+            }
+            
+            // Check processed actions
+            float max_proc = 0.0f;
+            for (size_t i = 0; i < _processed_actions.size(); ++i) {
+                max_proc = std::max(max_proc, std::abs(_processed_actions[i]));
+            }
+            
+            spdlog::info("[ACTION DEBUG] Raw: max={:.4f}, saturated={}/{}, Processed: max={:.4f} rad",
+                        max_raw, saturated_count, _raw_actions.size(), max_proc);
+            
+            // Print first few raw and processed actions
+            if (_raw_actions.size() >= 6 && _processed_actions.size() >= 6) {
+                spdlog::info("[ACTION DEBUG] Raw[0:5]: [{:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}]",
+                            _raw_actions[0], _raw_actions[1], _raw_actions[2],
+                            _raw_actions[3], _raw_actions[4], _raw_actions[5]);
+                spdlog::info("[ACTION DEBUG] Proc[0:5]: [{:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}, {:.3f}]",
+                            _processed_actions[0], _processed_actions[1], _processed_actions[2],
+                            _processed_actions[3], _processed_actions[4], _processed_actions[5]);
+            }
+            
+            // Warning if actions seem wrong
+            if (max_raw > 10.0f) {
+                spdlog::warn("[ACTION DEBUG] Raw actions very large (>10)! Policy output may be wrong.");
+            }
+            if (saturated_count > _raw_actions.size() / 3) {
+                spdlog::warn("[ACTION DEBUG] Many actions saturated (>1/3)! Possible observation mismatch.");
             }
         }
     }
