@@ -22,28 +22,22 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
     }
 
     // Optimized keyboard values based on curriculum training analysis
-    // Forward/backward: policy generalizes well beyond training range (trained 0.1, works at 0.4)
-    // Lateral/turning: limited to 50% of training max (NO curriculum, stayed at 0.1 entire training)
+    // Command magnitudes reduced for sim2real stability
+    // Forward/backward: reduced to 0.3 for safer real-world operation
+    // Lateral/turning: reduced to 0.3 for stability
     static std::unordered_map<std::string, std::vector<float>> key_commands = {
-        {"w", {0.5f, 0.0f, 0.0f}},    // Walk forward - generalizes well
-        {"s", {-0.5f, 0.0f, 0.0f}},   // Walk backward - generalizes well  
-        {"a", {0.0f, 0.5f, 0.0f}},   // Strafe left (50% of training max)
-        {"d", {0.0f, -0.5f, 0.0f}},  // Strafe right (50% of training max)
-        {"q", {0.0f, 0.0f, 1.00f}},   // Turn left (50% max - CRITICAL: no ang curriculum)
-        {"e", {0.0f, 0.0f, -1.00f}}   // Turn right (50% max - CRITICAL: no ang curriculum)
+        {"w", {0.3f, 0.0f, 0.0f}},    // Walk forward - reduced for stability
+        {"s", {-0.3f, 0.0f, 0.0f}},   // Walk backward - reduced for stability  
+        {"a", {0.0f, 0.3f, 0.0f}},    // Strafe left - reduced
+        {"d", {0.0f, -0.3f, 0.0f}},   // Strafe right - reduced
+        {"q", {0.0f, 0.0f, 0.5f}},    // Turn left - reduced for stability
+        {"e", {0.0f, 0.0f, -0.5f}}    // Turn right - reduced for stability
     };
     
     // Maintain last command state (static) to avoid jumping to zero when no key is pressed
     // This matches training behavior where commands persist until changed
     static std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
     static std::string last_processed_key = "";
-    static bool initialized = false;
-    
-    // On first call, log that we're starting with zero command
-    if (!initialized) {
-        spdlog::info("[CMD INIT] keyboard_velocity_commands initialized with zero command [0.0, 0.0, 0.0]");
-        initialized = true;
-    }
     
     // Only update command when a NEW valid key is pressed (not on every call)
     // This ensures consistency when observation is called multiple times per step
@@ -66,22 +60,10 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
     cmd[1] = std::clamp(cmd[1], cfg["lin_vel_y"][0].as<float>(), cfg["lin_vel_y"][1].as<float>());
     cmd[2] = std::clamp(cmd[2], cfg["ang_vel_z"][0].as<float>(), cfg["ang_vel_z"][1].as<float>());
     
-    // Debug instrumentation - log EVERY call for first 20 calls to catch timing issues
-    static int call_count = 0;
-    static bool detailed_debug = true;
-    
-    if (detailed_debug && call_count < 20) {
-        spdlog::info("[CMD DEBUG] Call {}: key='{}', last_processed='{}', cmd=[{:.3f}, {:.3f}, {:.3f}]", 
-                    call_count, key, last_processed_key, cmd[0], cmd[1], cmd[2]);
-        call_count++;
-        if (call_count >= 20) {
-            detailed_debug = false;
-            spdlog::info("[CMD DEBUG] Detailed logging stopped after 20 calls. Continuing with periodic logs.");
-        }
-    }
-    
+    // Debug instrumentation
     if (isaaclab::debug::is_debug_enabled()) {
-        if (call_count % 50 == 0 && call_count > 0) {
+        static int call_count = 0;
+        if (call_count++ % 50 == 0) {
             isaaclab::debug::print_stats(cmd, "keyboard_velocity_commands");
             isaaclab::debug::print_first(cmd, "keyboard_velocity_commands", 3);
             isaaclab::debug::check_finite(cmd, "keyboard_velocity_commands");
@@ -170,7 +152,8 @@ void State_RLBase::run()
     // Optional action smoothing to reduce jitter (0.0 = no smoothing, 1.0 = full smoothing)
     // Lower values = more responsive but potentially more jittery
     // Higher values = smoother but potentially slower response
-    static const float ACTION_SMOOTHING = 0.0f;  // Set to 0.2-0.3 to reduce jitter
+    // NOTE: For sim2real, 0.2-0.3 can help reduce twitching
+    static const float ACTION_SMOOTHING = 0.2f;  // Enabled to reduce sim2real jitter
     static std::vector<float> smoothed_action;
     
     auto action = env->action_manager->processed_actions();
