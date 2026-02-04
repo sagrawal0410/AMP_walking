@@ -204,24 +204,24 @@ public:
         
         episode_length += 1;
         robot->update();
-        auto obs = observation_manager->compute();
+        auto obs_vec = observation_manager->compute();
         
         // Debug: Print observation size for first few steps
         static int obs_debug_count = 0;
         if (obs_debug_count++ < 5) {
-            spdlog::info("[OBS SIZE DEBUG] Step {}: obs size = {} (expected 585)", obs_debug_count, obs.size());
-            if (obs.size() != 585) {
-                spdlog::error("[CRITICAL] Observation size mismatch! Expected 585, got {}", obs.size());
+            spdlog::info("[OBS SIZE DEBUG] Step {}: obs size = {} (expected 585)", obs_debug_count, obs_vec.size());
+            if (obs_vec.size() != 585) {
+                spdlog::error("[CRITICAL] Observation size mismatch! Expected 585, got {}", obs_vec.size());
             }
             // Print first 20 values for debugging
-            if (obs.size() >= 20) {
+            if (obs_vec.size() >= 20) {
                 spdlog::info("[OBS DEBUG] First 20 values: [{:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}]",
-                    obs[0], obs[1], obs[2], obs[3], obs[4], obs[5], obs[6], obs[7], obs[8], obs[9],
-                    obs[10], obs[11], obs[12], obs[13], obs[14], obs[15], obs[16], obs[17], obs[18], obs[19]);
+                    obs_vec[0], obs_vec[1], obs_vec[2], obs_vec[3], obs_vec[4], obs_vec[5], obs_vec[6], obs_vec[7], obs_vec[8], obs_vec[9],
+                    obs_vec[10], obs_vec[11], obs_vec[12], obs_vec[13], obs_vec[14], obs_vec[15], obs_vec[16], obs_vec[17], obs_vec[18], obs_vec[19]);
             }
         }
         
-        auto action = alg->act(obs);
+        auto action = alg->act(obs_vec);
         action_manager->process_action(action);
         
         // Increment step counter for dumps
