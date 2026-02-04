@@ -132,7 +132,7 @@ public:
         
         // Debug: Verify final obs size and slice boundaries
         if (isaaclab::debug::is_debug_enabled()) {
-            static int verify_count = 0;
+            static int verify_count = 10;
             if (verify_count++ % 50 == 0) {
                 spdlog::info("[DEBUG] ========== FINAL OBS VECTOR VERIFICATION ==========");
                 spdlog::info("[DEBUG] Total obs size = {} (expected 585)", obs.size());

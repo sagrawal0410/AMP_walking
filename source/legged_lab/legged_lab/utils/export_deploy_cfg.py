@@ -174,10 +174,12 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
         # Use class name instead of term name for deploy compatibility
         cfg["actions"][action_class_name] = term_cfg
 
-        if action_term._joint_ids == slice(None):
-            cfg["actions"][action_class_name]["joint_ids"] = None
-        else:
+        # Only include joint_ids if it's NOT slice(None) (i.e., not "all joints")
+        # When joint_ids is omitted, C++ defaults to using all joints
+        # Don't write joint_ids: null - yaml-cpp has issues parsing it
+        if action_term._joint_ids != slice(None):
             cfg["actions"][action_class_name]["joint_ids"] = action_term._joint_ids
+        # If joint_ids is slice(None), don't add it at all - C++ will use all joints by default
         
         # Remove joint_names entirely - C++ doesn't need it, and it causes parsing errors if it contains None
         if "joint_names" in cfg["actions"][action_class_name]:
