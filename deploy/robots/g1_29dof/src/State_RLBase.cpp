@@ -37,6 +37,13 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
     // This matches training behavior where commands persist until changed
     static std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
     static std::string last_processed_key = "";
+    static bool initialized = false;
+    
+    // On first call, log that we're starting with zero command
+    if (!initialized) {
+        spdlog::info("[CMD INIT] keyboard_velocity_commands initialized with zero command [0.0, 0.0, 0.0]");
+        initialized = true;
+    }
     
     // Only update command when a NEW valid key is pressed (not on every call)
     // This ensures consistency when observation is called multiple times per step
@@ -59,10 +66,22 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
     cmd[1] = std::clamp(cmd[1], cfg["lin_vel_y"][0].as<float>(), cfg["lin_vel_y"][1].as<float>());
     cmd[2] = std::clamp(cmd[2], cfg["ang_vel_z"][0].as<float>(), cfg["ang_vel_z"][1].as<float>());
     
-    // Debug instrumentation
+    // Debug instrumentation - log EVERY call for first 20 calls to catch timing issues
+    static int call_count = 0;
+    static bool detailed_debug = true;
+    
+    if (detailed_debug && call_count < 20) {
+        spdlog::info("[CMD DEBUG] Call {}: key='{}', last_processed='{}', cmd=[{:.3f}, {:.3f}, {:.3f}]", 
+                    call_count, key, last_processed_key, cmd[0], cmd[1], cmd[2]);
+        call_count++;
+        if (call_count >= 20) {
+            detailed_debug = false;
+            spdlog::info("[CMD DEBUG] Detailed logging stopped after 20 calls. Continuing with periodic logs.");
+        }
+    }
+    
     if (isaaclab::debug::is_debug_enabled()) {
-        static int call_count = 0;
-        if (call_count++ % 50 == 0) {
+        if (call_count % 50 == 0 && call_count > 0) {
             isaaclab::debug::print_stats(cmd, "keyboard_velocity_commands");
             isaaclab::debug::print_first(cmd, "keyboard_velocity_commands", 3);
             isaaclab::debug::check_finite(cmd, "keyboard_velocity_commands");
