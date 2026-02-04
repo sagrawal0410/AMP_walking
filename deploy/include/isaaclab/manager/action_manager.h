@@ -6,6 +6,7 @@
 #include "isaaclab/envs/manager_based_rl_env.h"
 #include "isaaclab/manager/manager_term_cfg.h"
 #include <numeric>
+#include <spdlog/spdlog.h>
 
 namespace isaaclab
 {
@@ -110,17 +111,28 @@ public:
 private:
     void _prepare_terms()
     {
+        spdlog::debug("ActionManager::_prepare_terms() starting...");
+        spdlog::default_logger()->flush();
         for(auto it = this->cfg.begin(); it != this->cfg.end(); ++it)
         {
             std::string action_name = it->first.as<std::string>();
+            spdlog::debug("Processing action term: '{}'", action_name);
+            spdlog::default_logger()->flush();
+            
             if(actions_map().find(action_name) == actions_map().end())
             {
                 throw std::runtime_error("Action term '" + action_name + "' is not registered.");
             }
 
+            spdlog::debug("Creating action term: '{}'", action_name);
+            spdlog::default_logger()->flush();
             auto term = actions_map()[action_name](it->second, env);
             _terms.push_back(std::move(term));
+            spdlog::debug("Action term '{}' created successfully", action_name);
+            spdlog::default_logger()->flush();
         }
+        spdlog::debug("ActionManager::_prepare_terms() completed");
+        spdlog::default_logger()->flush();
     }
 
     std::vector<float> _action;

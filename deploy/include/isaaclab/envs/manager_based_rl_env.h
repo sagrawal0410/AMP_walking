@@ -150,11 +150,16 @@ public:
             throw;
         }
 
+        spdlog::debug("Calling robot->update()...");
+        spdlog::default_logger()->flush();
         robot->update();
+        spdlog::debug("robot->update() completed");
+        spdlog::default_logger()->flush();
 
         // load managers with detailed error handling
         try {
             spdlog::debug("Creating ActionManager...");
+            spdlog::default_logger()->flush();
             action_manager = std::make_unique<ActionManager>(cfg["actions"], this);
             spdlog::debug("ActionManager created successfully");
         } catch (const std::exception& e) {
@@ -164,8 +169,10 @@ public:
         
         try {
             spdlog::debug("Creating ObservationManager...");
+            spdlog::default_logger()->flush();
             observation_manager = std::make_unique<ObservationManager>(cfg["observations"], this);
             spdlog::debug("ObservationManager created successfully");
+            spdlog::default_logger()->flush();
         } catch (const std::exception& e) {
             spdlog::error("Failed to create ObservationManager: {}", e.what());
             throw;

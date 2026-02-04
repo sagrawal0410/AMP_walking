@@ -17,8 +17,15 @@ public:
     JointAction(YAML::Node cfg, ManagerBasedRLEnv* env)
     :ActionTerm(cfg, env)
     {
+        spdlog::debug("JointAction constructor starting...");
+        spdlog::default_logger()->flush();
+        
+        spdlog::debug("Checking joint_ids...");
+        spdlog::default_logger()->flush();
         if(cfg["joint_ids"].IsDefined() && !cfg["joint_ids"].IsNull()) {
             try {
+                spdlog::debug("Parsing joint_ids as vector<int>...");
+                spdlog::default_logger()->flush();
                 _joint_ids = cfg["joint_ids"].as<std::vector<int>>();
                 _action_dim = _joint_ids.size();
             } catch(const std::exception& e) {
@@ -27,19 +34,33 @@ public:
                 _action_dim = env->robot->data.joint_ids_map.size();
             }
         } else {
+            spdlog::debug("joint_ids not defined or null, using all joints");
+            spdlog::default_logger()->flush();
             _action_dim = env->robot->data.joint_ids_map.size();
         }
+        spdlog::debug("action_dim = {}", _action_dim);
+        spdlog::default_logger()->flush();
+        
         _raw_actions.resize(_action_dim, 0.0f);
         _processed_actions.resize(_action_dim, 0.0f);
+        
+        spdlog::debug("Parsing scale...");
+        spdlog::default_logger()->flush();
         if(cfg["scale"].IsDefined() && !cfg["scale"].IsNull()) {
             _scale = cfg["scale"].as<std::vector<float>>();
         }
+        spdlog::debug("Parsing offset...");
+        spdlog::default_logger()->flush();
         if(cfg["offset"].IsDefined() && !cfg["offset"].IsNull()) {
             _offset = cfg["offset"].as<std::vector<float>>();
         }
+        spdlog::debug("Parsing clip...");
+        spdlog::default_logger()->flush();
         if(cfg["clip"].IsDefined() && !cfg["clip"].IsNull()) {
             _clip = cfg["clip"].as<std::vector<std::vector<float> >>();
         }
+        spdlog::debug("JointAction constructor completed");
+        spdlog::default_logger()->flush();
     }
 
     virtual void process_actions(std::vector<float> actions)
