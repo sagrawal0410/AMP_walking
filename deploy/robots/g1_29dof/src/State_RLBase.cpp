@@ -15,24 +15,36 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
 {
     std::string key = FSMState::keyboard->key();
     static auto cfg = env->cfg["commands"]["base_velocity"]["ranges"];
-       
+    
+    // Key command mappings - must be defined BEFORE use
+    static std::unordered_map<std::string, std::vector<float>> key_commands = {
+        // Letter keys
+        {"w", {0.4f, 0.0f, 0.0f}},    // Walk forward
+        {"s", {-0.3f, 0.0f, 0.0f}},   // Walk backward
+        {"a", {0.0f, 0.25f, 0.0f}},   // Strafe left
+        {"d", {0.0f, -0.25f, 0.0f}},  // Strafe right
+        {"q", {0.0f, 0.0f, 0.5f}},    // Turn left
+        {"e", {0.0f, 0.0f, -0.5f}},   // Turn right
+        // Arrow keys (if keyboard returns these)
+        {"up", {0.4f, 0.0f, 0.0f}},
+        {"down", {-0.3f, 0.0f, 0.0f}},
+        {"left", {0.0f, 0.25f, 0.0f}},
+        {"right", {0.0f, -0.25f, 0.0f}},
+        // Space to stop
+        {"space", {0.0f, 0.0f, 0.0f}}
+    };
+    
+    // Log key presses for debugging
     static std::string last_logged_key = "";
     if(key != last_logged_key && !key.empty()) {
-        spdlog::info("Key detected: '{}' -> Command will be generated", key);
+        bool key_found = key_commands.find(key) != key_commands.end();
+        if (key_found) {
+            spdlog::info("Key detected: '{}' -> Command will be updated", key);
+        } else {
+            spdlog::warn("Key detected: '{}' -> NOT IN KEY MAP! Available: w,s,a,d,q,e,up,down,left,right,space", key);
+        }
         last_logged_key = key;
     }
-
-    // Optimized keyboard values based on curriculum training analysis
-    // Command magnitudes for sim2real stability with AMP
-    // 0.3 m/s is a good balance - fast enough to see movement, slow enough to be stable
-    static std::unordered_map<std::string, std::vector<float>> key_commands = {
-        {"w", {0.3f, 0.0f, 0.0f}},    // Walk forward - moderate speed
-        {"s", {-0.25f, 0.0f, 0.0f}},  // Walk backward - slightly slower (backward is harder)
-        {"a", {0.0f, 0.2f, 0.0f}},    // Strafe left - reduced for stability
-        {"d", {0.0f, -0.2f, 0.0f}},   // Strafe right - reduced for stability
-        {"q", {0.0f, 0.0f, 0.4f}},    // Turn left - moderate
-        {"e", {0.0f, 0.0f, -0.4f}}    // Turn right - moderate
-    };
     
     // Maintain last command state (static) to avoid jumping to zero when no key is pressed
     // This matches training behavior where commands persist until changed
@@ -149,12 +161,13 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
 
 void State_RLBase::run()
 {
-    // Optional action smoothing to reduce jitter (0.0 = no smoothing, 1.0 = full smoothing)
-    // Lower values = more responsive but potentially more jittery
-    // Higher values = smoother but potentially slower response
-    // NOTE: For sim2real with AMP policies, higher smoothing (0.4-0.5) helps prevent oscillations
-    static const float ACTION_SMOOTHING = 0.5f;  // Increased for AMP policy stability
+    // Action smoothing: 0.0 = no smoothing (responsive), 1.0 = full smoothing (slow)
+    // Lower values = faster response, needed for balance recovery
+    // REDUCED from 0.5 to 0.2 to allow faster balance corrections
+    static const float ACTION_SMOOTHING = 0.2f;
     static std::vector<float> smoothed_action;
+    static int warmup_frames = 0;
+    static const int WARMUP_FRAMES = 5;  // Skip first few frames for policy to warm up
     
     auto action = env->action_manager->processed_actions();
     
@@ -176,12 +189,28 @@ void State_RLBase::run()
         }
     }
     
-    // Initialize smoothed action on first call
+    // During warmup, hold current positions to let policy stabilize
+    if (warmup_frames < WARMUP_FRAMES) {
+        warmup_frames++;
+        spdlog::info("[WARMUP] Frame {}/{} - holding current positions", warmup_frames, WARMUP_FRAMES);
+        // Keep current joint positions during warmup
+        for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
+            int motor_idx = env->robot->data.joint_ids_map[i];
+            lowcmd->msg_.motor_cmd()[motor_idx].q() = lowstate->msg_.motor_state()[motor_idx].q();
+        }
+        return;
+    }
+    
+    // Initialize smoothed action with CURRENT joint positions (not zeros!)
+    // This prevents the initial jump when transitioning to velocity mode
     if (smoothed_action.empty()) {
         smoothed_action.resize(action.size());
         for (size_t i = 0; i < action.size(); ++i) {
-            smoothed_action[i] = action[i];
+            int motor_idx = env->robot->data.joint_ids_map[i];
+            // Start from current position, not from action (which may be zero initially)
+            smoothed_action[i] = lowstate->msg_.motor_state()[motor_idx].q();
         }
+        spdlog::info("[INIT] Smoothed action initialized from current joint positions");
     }
     
     for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
@@ -194,14 +223,14 @@ void State_RLBase::run()
             action_val = lowstate->msg_.motor_state()[motor_idx].q();
         }
         
-        // Apply smoothing if enabled
+        // Apply smoothing: blend between previous smoothed action and new action
+        // smoothed = alpha * old + (1-alpha) * new
         if (ACTION_SMOOTHING > 0.0f && i < smoothed_action.size()) {
             smoothed_action[i] = ACTION_SMOOTHING * smoothed_action[i] + (1.0f - ACTION_SMOOTHING) * action_val;
             action_val = smoothed_action[i];
         }
         
-        // Clamp to reasonable joint position limits (radians, not [-1,1]!)
-        // These are approximate limits - adjust based on actual robot limits
+        // Clamp to reasonable joint position limits
         action_val = std::clamp(action_val, -3.14f, 3.14f);
         
         lowcmd->msg_.motor_cmd()[motor_idx].q() = action_val;
