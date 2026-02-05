@@ -47,48 +47,18 @@ public:
         spdlog::debug("Parsing scale...");
         spdlog::default_logger()->flush();
         if(cfg["scale"].IsDefined() && !cfg["scale"].IsNull()) {
-            try {
-                _scale = cfg["scale"].as<std::vector<float>>();
-                spdlog::debug("scale parsed successfully, size = {}", _scale.size());
-            } catch(const std::exception& e) {
-                spdlog::error("Failed to parse scale: {}", e.what());
-                throw;
-            }
+            _scale = cfg["scale"].as<std::vector<float>>();
         }
         spdlog::debug("Parsing offset...");
         spdlog::default_logger()->flush();
         if(cfg["offset"].IsDefined() && !cfg["offset"].IsNull()) {
-            try {
-                _offset = cfg["offset"].as<std::vector<float>>();
-                spdlog::debug("offset parsed successfully, size = {}", _offset.size());
-            } catch(const std::exception& e) {
-                spdlog::error("Failed to parse offset: {}", e.what());
-                throw;
-            }
+            _offset = cfg["offset"].as<std::vector<float>>();
         }
-        spdlog::debug("Checking for clip field...");
+        spdlog::debug("Parsing clip...");
         spdlog::default_logger()->flush();
-        if(cfg["clip"].IsDefined()) {
-            spdlog::debug("clip field is defined, type = {}, isNull = {}", 
-                         static_cast<int>(cfg["clip"].Type()), cfg["clip"].IsNull());
-            spdlog::default_logger()->flush();
-            if(!cfg["clip"].IsNull()) {
-                try {
-                    spdlog::debug("Attempting to parse clip as vector<vector<float>>...");
-                    spdlog::default_logger()->flush();
-                    _clip = cfg["clip"].as<std::vector<std::vector<float> >>();
-                    spdlog::debug("clip parsed successfully, size = {}", _clip.size());
-                } catch(const std::exception& e) {
-                    spdlog::warn("Failed to parse clip (expected vector<vector<float>>), ignoring: {}", e.what());
-                    _clip.clear(); // Leave empty if parsing fails
-                }
-            } else {
-                spdlog::debug("clip is null, skipping");
-            }
-        } else {
-            spdlog::debug("clip not defined, skipping");
+        if(cfg["clip"].IsDefined() && !cfg["clip"].IsNull()) {
+            _clip = cfg["clip"].as<std::vector<std::vector<float> >>();
         }
-        spdlog::default_logger()->flush();
         spdlog::debug("JointAction constructor completed");
         spdlog::default_logger()->flush();
     }

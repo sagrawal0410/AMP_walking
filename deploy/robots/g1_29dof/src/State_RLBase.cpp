@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
 
 namespace isaaclab
 {
@@ -22,15 +23,15 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
     }
 
     // Optimized keyboard values based on curriculum training analysis
-    // Command magnitudes significantly reduced for sim2real stability with AMP
-    // Start very conservative and increase gradually as robot stabilizes
+    // Command magnitudes for sim2real stability with AMP
+    // 0.3 m/s is a good balance - fast enough to see movement, slow enough to be stable
     static std::unordered_map<std::string, std::vector<float>> key_commands = {
-        {"w", {0.15f, 0.0f, 0.0f}},   // Walk forward - very slow for testing
-        {"s", {-0.15f, 0.0f, 0.0f}},  // Walk backward - very slow  
-        {"a", {0.0f, 0.15f, 0.0f}},   // Strafe left - minimal
-        {"d", {0.0f, -0.15f, 0.0f}},  // Strafe right - minimal
-        {"q", {0.0f, 0.0f, 0.3f}},    // Turn left - reduced
-        {"e", {0.0f, 0.0f, -0.3f}}    // Turn right - reduced
+        {"w", {0.3f, 0.0f, 0.0f}},    // Walk forward - moderate speed
+        {"s", {-0.25f, 0.0f, 0.0f}},  // Walk backward - slightly slower (backward is harder)
+        {"a", {0.0f, 0.2f, 0.0f}},    // Strafe left - reduced for stability
+        {"d", {0.0f, -0.2f, 0.0f}},   // Strafe right - reduced for stability
+        {"q", {0.0f, 0.0f, 0.4f}},    // Turn left - moderate
+        {"e", {0.0f, 0.0f, -0.4f}}    // Turn right - moderate
     };
     
     // Maintain last command state (static) to avoid jumping to zero when no key is pressed
@@ -156,6 +157,24 @@ void State_RLBase::run()
     static std::vector<float> smoothed_action;
     
     auto action = env->action_manager->processed_actions();
+    
+    // Diagnostic: Log action statistics periodically
+    static int action_diag_count = 0;
+    if (action_diag_count++ % 100 == 0 && !action.empty()) {
+        float action_max = *std::max_element(action.begin(), action.end(), 
+            [](float a, float b) { return std::abs(a) < std::abs(b); });
+        float action_mean = std::accumulate(action.begin(), action.end(), 0.0f) / action.size();
+        int action_nonzero = std::count_if(action.begin(), action.end(), 
+            [](float a) { return std::abs(a) > 0.01f; });
+        spdlog::info("[ACTION DIAG] Processed actions: max_abs={:.4f} rad, mean={:.4f}, nonzero={}/{}", 
+                    std::abs(action_max), action_mean, action_nonzero, action.size());
+        if (std::abs(action_max) < 0.1f) {
+            spdlog::warn("[ACTION DIAG] WARNING: Actions very small (<0.1 rad)! Robot may not move.");
+        }
+        if (std::abs(action_max) > 2.0f) {
+            spdlog::warn("[ACTION DIAG] WARNING: Actions very large (>2.0 rad)! May cause instability.");
+        }
+    }
     
     // Initialize smoothed action on first call
     if (smoothed_action.empty()) {
