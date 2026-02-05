@@ -22,16 +22,15 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
     }
 
     // Optimized keyboard values based on curriculum training analysis
-    // Command magnitudes reduced for sim2real stability
-    // Forward/backward: reduced to 0.3 for safer real-world operation
-    // Lateral/turning: reduced to 0.3 for stability
+    // Command magnitudes significantly reduced for sim2real stability with AMP
+    // Start very conservative and increase gradually as robot stabilizes
     static std::unordered_map<std::string, std::vector<float>> key_commands = {
-        {"w", {0.3f, 0.0f, 0.0f}},    // Walk forward - reduced for stability
-        {"s", {-0.3f, 0.0f, 0.0f}},   // Walk backward - reduced for stability  
-        {"a", {0.0f, 0.3f, 0.0f}},    // Strafe left - reduced
-        {"d", {0.0f, -0.3f, 0.0f}},   // Strafe right - reduced
-        {"q", {0.0f, 0.0f, 0.5f}},    // Turn left - reduced for stability
-        {"e", {0.0f, 0.0f, -0.5f}}    // Turn right - reduced for stability
+        {"w", {0.15f, 0.0f, 0.0f}},   // Walk forward - very slow for testing
+        {"s", {-0.15f, 0.0f, 0.0f}},  // Walk backward - very slow  
+        {"a", {0.0f, 0.15f, 0.0f}},   // Strafe left - minimal
+        {"d", {0.0f, -0.15f, 0.0f}},  // Strafe right - minimal
+        {"q", {0.0f, 0.0f, 0.3f}},    // Turn left - reduced
+        {"e", {0.0f, 0.0f, -0.3f}}    // Turn right - reduced
     };
     
     // Maintain last command state (static) to avoid jumping to zero when no key is pressed
@@ -152,8 +151,8 @@ void State_RLBase::run()
     // Optional action smoothing to reduce jitter (0.0 = no smoothing, 1.0 = full smoothing)
     // Lower values = more responsive but potentially more jittery
     // Higher values = smoother but potentially slower response
-    // NOTE: For sim2real, 0.2-0.3 can help reduce twitching
-    static const float ACTION_SMOOTHING = 0.2f;  // Enabled to reduce sim2real jitter
+    // NOTE: For sim2real with AMP policies, higher smoothing (0.4-0.5) helps prevent oscillations
+    static const float ACTION_SMOOTHING = 0.5f;  // Increased for AMP policy stability
     static std::vector<float> smoothed_action;
     
     auto action = env->action_manager->processed_actions();
