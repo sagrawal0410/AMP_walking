@@ -24,7 +24,6 @@ Usage:
 
 import argparse
 import os
-import re
 import sys
 import time
 from collections import deque
@@ -273,13 +272,10 @@ class AmpMujocoRunner:
         self.do_render = render
 
         # ── Load MuJoCo model ──
+        # Use from_xml_path so that <include> directives and meshdir resolve correctly
         model_path_abs = os.path.abspath(model_path)
-        model_dir = os.path.dirname(model_path_abs)
-        mesh_dir = os.path.join(model_dir, "meshes")
-        with open(model_path_abs, "r") as f:
-            xml = f.read()
-        xml = re.sub(r'meshdir="meshes"', f'meshdir="{mesh_dir}"', xml)
-        self.model = mujoco.MjModel.from_xml_string(xml)
+        print(f"[MUJOCO] Loading model: {model_path_abs}")
+        self.model = mujoco.MjModel.from_xml_path(model_path_abs)
         self.model.opt.timestep = self.cfg.sim_dt
         self.data = mujoco.MjData(self.model)
 
@@ -731,7 +727,11 @@ def find_default_paths(robot: str = "g1_29dof"):
     if not os.path.isfile(deploy_yaml):
         deploy_yaml = os.path.join(policy_dir, "params", "deploy_1.yaml")
 
-    model_xml = os.path.join(root, "deploy", "robots", robot, f"{robot}.xml")
+    # Use unitree_mujoco scene XML (includes ground plane, lighting, skybox)
+    model_xml = os.path.join(script_dir, "unitree_mujoco", "unitree_robots", "g1", "scene_29dof.xml")
+    if not os.path.isfile(model_xml):
+        # Fallback to bare robot XML (no ground plane)
+        model_xml = os.path.join(root, "deploy", "robots", robot, f"{robot}.xml")
 
     return policy_onnx, deploy_yaml, model_xml
 
