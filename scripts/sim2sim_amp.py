@@ -573,9 +573,22 @@ class AmpController:
             time.sleep(0.01)
         print("[CTRL] Robot state received!")
 
-        # ── Setup keyboard ──
+        # ── Setup keyboard (hold-to-move with smooth decay) ──
         transition_request = [None]
-        vel_adjust = [None]
+        held_keys = set()  # track which movement keys are currently held
+
+        # ── Velocity targets when key is held ──
+        KEY_VELOCITIES = {
+            'w': np.array([ 0.4,  0.0,  0.0]),   # forward
+            's': np.array([-0.3,  0.0,  0.0]),   # backward
+            'a': np.array([ 0.0,  0.05, 0.0]),   # strafe left
+            'd': np.array([ 0.0, -0.05, 0.0]),   # strafe right
+            'q': np.array([ 0.0,  0.0,  0.05]),  # turn left
+            'e': np.array([ 0.0,  0.0, -0.05]),  # turn right
+        }
+        # Smoothing: higher = snappier response, lower = smoother
+        ATTACK_RATE = 0.15   # how fast velocity ramps UP toward target
+        DECAY_RATE  = 0.3    # how fast velocity decays to zero after release
 
         if PYNPUT_AVAILABLE:
             def on_key_press(key):
@@ -590,29 +603,26 @@ class AmpController:
                             transition_request[0] = FSMState.VELOCITY
                     elif hasattr(key, 'char') and key.char:
                         c = key.char.lower()
-                        # Per-key velocity increments — adjust these to taste
-                        FWD_DELTA = 0.01    # forward/backward speed per press
-                        LAT_DELTA = 0.05   # strafe speed per press
-                        YAW_DELTA = 0.05   # turn speed per press
-                        if c == 'w':
-                            vel_adjust[0] = (0, FWD_DELTA)
-                        elif c == 's':
-                            vel_adjust[0] = (0, -FWD_DELTA)
-                        elif c == 'a':
-                            vel_adjust[0] = (1, LAT_DELTA)
-                        elif c == 'd':
-                            vel_adjust[0] = (1, -LAT_DELTA)
-                        elif c == 'q':
-                            vel_adjust[0] = (2, YAW_DELTA)
-                        elif c == 'e':
-                            vel_adjust[0] = (2, -YAW_DELTA)
+                        if c in KEY_VELOCITIES:
+                            held_keys.add(c)
                         elif c == ' ':
                             self.command_vel[:] = 0.0
+                            held_keys.clear()
                             print("[CMD] Velocity zeroed")
                 except Exception:
                     pass
 
-            listener = pynput_keyboard.Listener(on_press=on_key_press)
+            def on_key_release(key):
+                try:
+                    if hasattr(key, 'char') and key.char:
+                        held_keys.discard(key.char.lower())
+                except Exception:
+                    pass
+
+            listener = pynput_keyboard.Listener(
+                on_press=on_key_press,
+                on_release=on_key_release,
+            )
             listener.start()
         else:
             print("[WARNING] pynput not installed — no keyboard control")
@@ -665,17 +675,22 @@ class AmpController:
                         self.raw_action[:] = 0.0
                     print(f"[FSM] {old_name} → {new_state.name}")
 
-                # ── Handle velocity adjustments ──
-                if vel_adjust[0] is not None:
-                    idx, delta = vel_adjust[0]
-                    vel_adjust[0] = None
-                    if self.fsm_state == FSMState.VELOCITY:
-                        self.command_vel[idx] = np.clip(
-                            self.command_vel[idx] + delta, -1.0, 3.0
-                        )
-                        print(f"[CMD] vel=[{self.command_vel[0]:.2f}, "
-                              f"{self.command_vel[1]:.2f}, "
-                              f"{self.command_vel[2]:.2f}]")
+                # ── Smooth velocity: attack while held, decay when released ──
+                if self.fsm_state == FSMState.VELOCITY:
+                    if held_keys:
+                        # Sum target velocities from all held keys
+                        target = np.zeros(3)
+                        for k in held_keys:
+                            if k in KEY_VELOCITIES:
+                                target += KEY_VELOCITIES[k]
+                        # Smooth ramp toward target
+                        self.command_vel += (target - self.command_vel) * ATTACK_RATE
+                    else:
+                        # No keys held → decay toward zero
+                        self.command_vel *= (1.0 - DECAY_RATE)
+                        # Snap to zero when close enough
+                        mask = np.abs(self.command_vel) < 0.005
+                        self.command_vel[mask] = 0.0
 
                 # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
