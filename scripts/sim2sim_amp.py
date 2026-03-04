@@ -579,8 +579,8 @@ class AmpController:
 
         # ── Velocity targets when key is held ──
         KEY_VELOCITIES = {
-            'w': np.array([ 0.6,  0.0,  0.0]),   # forward
-            's': np.array([-0.6,  0.0,  0.0]),   # backward
+            'w': np.array([ 1.0,  0.0,  0.0]),   # forward
+            's': np.array([-1.0,  0.0,  0.0]),   # backward
             'a': np.array([ 0.0,  0.2, 0.0]),   # strafe left
             'd': np.array([ 0.0, -0.2, 0.0]),   # strafe right
             'q': np.array([ 0.0,  0.0,  0.2]),  # turn left
