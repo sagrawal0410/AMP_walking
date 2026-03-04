@@ -579,12 +579,12 @@ class AmpController:
 
         # ── Velocity targets when key is held ──
         KEY_VELOCITIES = {
-            'w': np.array([ 0.4,  0.0,  0.0]),   # forward
-            's': np.array([-0.3,  0.0,  0.0]),   # backward
-            'a': np.array([ 0.0,  0.05, 0.0]),   # strafe left
-            'd': np.array([ 0.0, -0.05, 0.0]),   # strafe right
-            'q': np.array([ 0.0,  0.0,  0.05]),  # turn left
-            'e': np.array([ 0.0,  0.0, -0.05]),  # turn right
+            'w': np.array([ 0.6,  0.0,  0.0]),   # forward
+            's': np.array([-0.6,  0.0,  0.0]),   # backward
+            'a': np.array([ 0.0,  0.2, 0.0]),   # strafe left
+            'd': np.array([ 0.0, -0.2, 0.0]),   # strafe right
+            'q': np.array([ 0.0,  0.0,  0.2]),  # turn left
+            'e': np.array([ 0.0,  0.0, -0.2]),  # turn right
         }
         # Smoothing factor (matches C++ controller's 0.15 exponential smoothing).
         # At 50Hz with 0.15: reaches ~50% in 200ms, ~95% in 600ms.
