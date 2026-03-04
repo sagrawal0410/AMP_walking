@@ -58,7 +58,8 @@ try:
     from unitree_sdk2py.idl.unitree_hg.msg.dds_ import LowState_ as HGLowState
     from unitree_sdk2py.idl.default import unitree_hg_msg_dds__LowCmd_ as HGLowCmdDefault
     UNITREE_SDK_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    print(f"[WARNING] unitree_sdk2py import failed: {e}")
     UNITREE_SDK_AVAILABLE = False
 
 try:
