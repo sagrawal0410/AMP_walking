@@ -591,7 +591,7 @@ class AmpController:
                     elif hasattr(key, 'char') and key.char:
                         c = key.char.lower()
                         # Per-key velocity increments — adjust these to taste
-                        FWD_DELTA = 0.05    # forward/backward speed per press
+                        FWD_DELTA = 0.001    # forward/backward speed per press
                         LAT_DELTA = 0.05   # strafe speed per press
                         YAW_DELTA = 0.05   # turn speed per press
                         if c == 'w':
