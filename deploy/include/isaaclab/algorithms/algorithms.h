@@ -30,7 +30,7 @@ public:
         std::lock_guard<std::mutex> lock(act_mtx_);
         return action;
     }
-
+    
     std::vector<float> action;
 
 protected:
@@ -131,7 +131,7 @@ public:
                 }
             }
         }
-
+        
         // If invalid obs, return zero actions (safe behavior)
         if (!obs_valid) {
             spdlog::error("Invalid observations detected! Returning zero actions.");
@@ -237,11 +237,11 @@ public:
 
         if (outputs.empty()) {
             spdlog::error("ONNXRuntime returned no outputs! Returning zero actions.");
-            std::lock_guard<std::mutex> lock(act_mtx_);
-            std::fill(action.begin(), action.end(), 0.0f);
-            return action;
-        }
-
+                std::lock_guard<std::mutex> lock(act_mtx_);
+                std::fill(action.begin(), action.end(), 0.0f);
+                return action;
+            }
+            
         // Read output tensor and resize action dynamically if needed
         auto& out0 = outputs.front();
         auto out_shape = out0.GetTensorTypeAndShapeInfo().GetShape();
@@ -285,7 +285,7 @@ public:
         if (isaaclab::debug::is_dump_enabled()) {
             int step = isaaclab::debug::get_current_step();
             if (step <= 200) {
-                std::lock_guard<std::mutex> lock(act_mtx_);
+        std::lock_guard<std::mutex> lock(act_mtx_);
                 std::string dump_dir = isaaclab::debug::get_dump_dir();
                 std::string filepath = dump_dir + "/act_step_" + std::to_string(step) + ".csv";
                 isaaclab::debug::dump_csv(filepath, action);
@@ -299,12 +299,12 @@ public:
             for (size_t i = 0; i < action.size(); ++i) {
                 if (!std::isfinite(action[i])) {
                     spdlog::error("[DEBUG] CRITICAL: Policy output NaN/Inf at action[{}] = {}. Setting to zero.", i, action[i]);
-                    action[i] = 0.0f;
-                    action_valid = false;
-                }
+                action[i] = 0.0f;
+                action_valid = false;
+            }
             }
         }
-
+        
         if (!action_valid) {
             spdlog::error("[DEBUG] CRITICAL: Policy produced invalid outputs! Actions sanitized.");
             if (isaaclab::debug::is_dump_enabled()) {
@@ -320,7 +320,7 @@ public:
                 }
             }
         }
-
+        
         return get_action();
     }
 

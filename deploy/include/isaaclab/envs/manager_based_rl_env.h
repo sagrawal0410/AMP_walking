@@ -31,7 +31,7 @@ public:
         // Parse configuration with error handling
         try {
             spdlog::debug("Parsing step_dt...");
-            this->step_dt = cfg["step_dt"].as<float>();
+        this->step_dt = cfg["step_dt"].as<float>();
         } catch (const std::exception& e) {
             spdlog::error("Failed to parse step_dt: {}", e.what());
             throw;
@@ -155,7 +155,7 @@ public:
         // load managers with detailed error handling
         try {
             spdlog::debug("Creating ActionManager...");
-            action_manager = std::make_unique<ActionManager>(cfg["actions"], this);
+        action_manager = std::make_unique<ActionManager>(cfg["actions"], this);
             spdlog::debug("ActionManager created successfully");
         } catch (const std::exception& e) {
             spdlog::error("Failed to create ActionManager: {}", e.what());
@@ -164,7 +164,7 @@ public:
         
         try {
             spdlog::debug("Creating ObservationManager...");
-            observation_manager = std::make_unique<ObservationManager>(cfg["observations"], this);
+        observation_manager = std::make_unique<ObservationManager>(cfg["observations"], this);
             spdlog::debug("ObservationManager created successfully");
         } catch (const std::exception& e) {
             spdlog::error("Failed to create ObservationManager: {}", e.what());

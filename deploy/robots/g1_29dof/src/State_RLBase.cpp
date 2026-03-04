@@ -147,14 +147,21 @@ void State_RLBase::run()
 {
     auto action = env->action_manager->processed_actions();
     for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
-        lowcmd->msg_.motor_cmd()[env->robot->data.joint_ids_map[i]].q() = action[i];
         float action_val = action[i];
         int motor_idx = env->robot->data.joint_ids_map[i];
+        
+        // NaN/Inf safety: fall back to current motor position
         if(!std::isfinite(action_val)) {
             spdlog::error("Invalid action[{}]: {} (NaN/Inf detected)! Using current position.", i, action_val);
             action_val = lowstate->msg_.motor_state()[motor_idx].q();
         }
-        action_val = std::clamp(action_val, -1.0f, 1.0f);
+        
+        // NOTE: Do NOT clamp to [-1, 1]. The processed actions are joint position
+        // targets in radians (raw_action * scale + offset), where offset can be ~0.97
+        // for elbows, ~0.3 for knees, etc. Clamping to [-1, 1] destroys these targets
+        // and causes massive action saturation / instability.
+        // If safety clamping is needed, use actual joint limits from the URDF/USD.
+        
         lowcmd->msg_.motor_cmd()[motor_idx].q() = action_val;
     }
 }

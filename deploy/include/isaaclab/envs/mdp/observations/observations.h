@@ -595,10 +595,19 @@ REGISTER_OBSERVATION(key_body_pos_b)
     const size_t num_key_bodies = body_names.size();
     std::vector<float> obs(num_key_bodies * 3);  // 3D positions
     
-    // Get joint positions (already in SDK order from robot data)
-    // Convert Eigen vector to std::vector
-    const auto& joint_pos_eigen = asset->data.joint_pos;
-    std::vector<float> joint_pos(joint_pos_eigen.data(), joint_pos_eigen.data() + joint_pos_eigen.size());
+    // IMPORTANT: data.joint_pos is in POLICY order (populated via joint_ids_map in update()),
+    // but computeKeyBodyPosition_G1() expects joints in SDK order.
+    // We must convert from policy order -> SDK order using joint_ids_map as the inverse mapping:
+    //   joint_ids_map[policy_idx] = sdk_idx  =>  sdk_joint_pos[sdk_idx] = policy_joint_pos[policy_idx]
+    const auto& joint_pos_policy = asset->data.joint_pos;
+    const auto& joint_ids_map = asset->data.joint_ids_map;
+    std::vector<float> joint_pos(joint_ids_map.size(), 0.0f);
+    for (size_t i = 0; i < joint_ids_map.size(); ++i) {
+        int sdk_idx = static_cast<int>(joint_ids_map[i]);
+        if (sdk_idx >= 0 && sdk_idx < static_cast<int>(joint_pos.size())) {
+            joint_pos[sdk_idx] = joint_pos_policy[i];
+        }
+    }
     
     // Debug logging (prints every 100 calls)
     static int fk_debug_count = 0;

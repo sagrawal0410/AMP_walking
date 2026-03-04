@@ -14,12 +14,14 @@ public:
     
     void enter()
     {
-        // set gain
-        for (int i = 0; i < env->robot->data.joint_stiffness.size(); ++i)
+        // Set PD gains. Note: stiffness/damping in deploy.yaml are in SDK order
+        // (the export script does: stiffness[joint_ids_map] = internal_stiffness),
+        // so we index them by the SDK motor index, not by policy index.
+        for (int i = 0; i < env->robot->data.joint_ids_map.size(); ++i)
         {
             int motor_idx = env->robot->data.joint_ids_map[i];
-            lowcmd->msg_.motor_cmd()[motor_idx].kp() = env->robot->data.joint_stiffness[i];
-            lowcmd->msg_.motor_cmd()[motor_idx].kd() = env->robot->data.joint_damping[i];
+            lowcmd->msg_.motor_cmd()[motor_idx].kp() = env->robot->data.joint_stiffness[motor_idx];
+            lowcmd->msg_.motor_cmd()[motor_idx].kd() = env->robot->data.joint_damping[motor_idx];
             lowcmd->msg_.motor_cmd()[motor_idx].dq() = 0;
             lowcmd->msg_.motor_cmd()[motor_idx].tau() = 0;
         }
