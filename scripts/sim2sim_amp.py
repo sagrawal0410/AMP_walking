@@ -586,9 +586,11 @@ class AmpController:
             'q': np.array([ 0.0,  0.0,  0.05]),  # turn left
             'e': np.array([ 0.0,  0.0, -0.05]),  # turn right
         }
-        # Smoothing: higher = snappier response, lower = smoother
-        ATTACK_RATE = 0.15   # how fast velocity ramps UP toward target
-        DECAY_RATE  = 0.3    # how fast velocity decays to zero after release
+        # Smoothing factor (matches C++ controller's 0.15 exponential smoothing).
+        # At 50Hz with 0.15: reaches ~50% in 200ms, ~95% in 600ms.
+        # Keep this LOW — the policy was trained with commands held constant
+        # for long periods, so rapid changes destabilize it.
+        SMOOTHING = 0.15
 
         if PYNPUT_AVAILABLE:
             def on_key_press(key):
@@ -675,22 +677,20 @@ class AmpController:
                         self.raw_action[:] = 0.0
                     print(f"[FSM] {old_name} → {new_state.name}")
 
-                # ── Smooth velocity: attack while held, decay when released ──
+                # ── Smooth velocity: exponential smoothing toward target ──
+                # Same approach as C++ controller: smoothly interpolate toward
+                # target (key-held) or zero (no key), using a single rate.
                 if self.fsm_state == FSMState.VELOCITY:
+                    target = np.zeros(3)
                     if held_keys:
-                        # Sum target velocities from all held keys
-                        target = np.zeros(3)
                         for k in held_keys:
                             if k in KEY_VELOCITIES:
                                 target += KEY_VELOCITIES[k]
-                        # Smooth ramp toward target
-                        self.command_vel += (target - self.command_vel) * ATTACK_RATE
-                    else:
-                        # No keys held → decay toward zero
-                        self.command_vel *= (1.0 - DECAY_RATE)
-                        # Snap to zero when close enough
-                        mask = np.abs(self.command_vel) < 0.005
-                        self.command_vel[mask] = 0.0
+                    # Smooth interpolation: same rate for attack AND decay
+                    self.command_vel += (target - self.command_vel) * SMOOTHING
+                    # Deadzone: snap to zero when very small
+                    mask = np.abs(self.command_vel) < 0.01
+                    self.command_vel[mask] = 0.0
 
                 # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
