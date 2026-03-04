@@ -590,18 +590,22 @@ class AmpController:
                             transition_request[0] = FSMState.VELOCITY
                     elif hasattr(key, 'char') and key.char:
                         c = key.char.lower()
+                        # Per-key velocity increments — adjust these to taste
+                        FWD_DELTA = 0.1    # forward/backward speed per press
+                        LAT_DELTA = 0.05   # strafe speed per press
+                        YAW_DELTA = 0.05   # turn speed per press
                         if c == 'w':
-                            vel_adjust[0] = (0, 0.1)
+                            vel_adjust[0] = (0, FWD_DELTA)
                         elif c == 's':
-                            vel_adjust[0] = (0, -0.1)
+                            vel_adjust[0] = (0, -FWD_DELTA)
                         elif c == 'a':
-                            vel_adjust[0] = (1, 0.1)
+                            vel_adjust[0] = (1, LAT_DELTA)
                         elif c == 'd':
-                            vel_adjust[0] = (1, -0.1)
+                            vel_adjust[0] = (1, -LAT_DELTA)
                         elif c == 'q':
-                            vel_adjust[0] = (2, 0.1)
+                            vel_adjust[0] = (2, YAW_DELTA)
                         elif c == 'e':
-                            vel_adjust[0] = (2, -0.1)
+                            vel_adjust[0] = (2, -YAW_DELTA)
                         elif c == ' ':
                             self.command_vel[:] = 0.0
                             print("[CMD] Velocity zeroed")
