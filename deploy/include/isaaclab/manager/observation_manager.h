@@ -167,10 +167,10 @@ protected:
     void _prapare_terms()
     {
         // Parse use_gym_history and obs_order at this level first
-        if(this->cfg["use_gym_history"].IsDefined()) {
+        if(this->cfg["use_gym_history"].IsDefined() && !this->cfg["use_gym_history"].IsNull()) {
             use_gym_history = this->cfg["use_gym_history"].as<bool>();
         }
-        if(this->cfg["obs_order"].IsDefined()) {
+        if(this->cfg["obs_order"].IsDefined() && !this->cfg["obs_order"].IsNull()) {
             obs_order_ = this->cfg["obs_order"].as<std::vector<std::string>>();
         }
         
@@ -218,11 +218,11 @@ protected:
         {
             std::string key = it->first.as<std::string>();
             if(key == "scale_first") {
-                scale_first = it->second.as<bool>();
+                if(!it->second.IsNull()) scale_first = it->second.as<bool>();
                 continue;
             }
             if(key == "use_gym_history") { // set only once
-                use_gym_history = it->second.as<bool>();
+                if(!it->second.IsNull()) use_gym_history = it->second.as<bool>();
                 continue;
             }
             if(key == "obs_order") { // skip obs_order, already parsed above
@@ -234,7 +234,12 @@ protected:
             ObservationTermCfg term_cfg;
             term_cfg.params = term_yaml_cfg["params"];
             term_cfg.scale_first = scale_first;
-            term_cfg.history_length = term_yaml_cfg["history_length"].as<int>(1);
+            if(term_yaml_cfg["history_length"].IsDefined() && !term_yaml_cfg["history_length"].IsNull()) {
+                term_cfg.history_length = term_yaml_cfg["history_length"].as<int>();
+            } else {
+                term_cfg.history_length = 1;  // default
+                spdlog::warn("Observation term '{}' has null/missing history_length, defaulting to 1", key);
+            }
 
             auto term_name = key;
             if(observations_map()[term_name] == nullptr) {
