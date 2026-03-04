@@ -341,6 +341,7 @@ class AmpMujocoRunner:
             "base_ang_vel": 3,
             "root_local_rot_tan_norm": 6,
             "velocity_commands": 3,
+            "keyboard_velocity_commands": 3,  # alias used by some deploy.yaml variants
             "joint_pos": NUM_JOINTS,
             "joint_vel": NUM_JOINTS,
             "last_action": NUM_JOINTS,
@@ -445,6 +446,7 @@ class AmpMujocoRunner:
             "base_ang_vel": base_ang_vel,
             "root_local_rot_tan_norm": root_rot,
             "velocity_commands": self.command_vel.copy(),
+            "keyboard_velocity_commands": self.command_vel.copy(),  # alias
             "joint_pos": joint_pos_policy,
             "joint_vel": joint_vel_policy,
             "last_action": self.raw_action.copy(),

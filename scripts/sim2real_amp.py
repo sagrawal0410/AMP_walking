@@ -394,6 +394,7 @@ class AmpRealRunner:
             "base_ang_vel": 3,
             "root_local_rot_tan_norm": 6,
             "velocity_commands": 3,
+            "keyboard_velocity_commands": 3,  # alias used by some deploy.yaml variants
             "joint_pos": NUM_JOINTS,
             "joint_vel": NUM_JOINTS,
             "last_action": NUM_JOINTS,
@@ -456,6 +457,7 @@ class AmpRealRunner:
             "base_ang_vel": self.imu_gyro.copy(),
             "root_local_rot_tan_norm": self._compute_root_local_rot_tan_norm(),
             "velocity_commands": self.command_vel.copy(),
+            "keyboard_velocity_commands": self.command_vel.copy(),  # alias
             "joint_pos": joint_pos_policy,
             "joint_vel": joint_vel_policy,
             "last_action": self.raw_action.copy(),
