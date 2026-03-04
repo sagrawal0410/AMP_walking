@@ -150,16 +150,11 @@ public:
             throw;
         }
 
-        spdlog::debug("Calling robot->update()...");
-        spdlog::default_logger()->flush();
         robot->update();
-        spdlog::debug("robot->update() completed");
-        spdlog::default_logger()->flush();
 
         // load managers with detailed error handling
         try {
             spdlog::debug("Creating ActionManager...");
-            spdlog::default_logger()->flush();
             action_manager = std::make_unique<ActionManager>(cfg["actions"], this);
             spdlog::debug("ActionManager created successfully");
         } catch (const std::exception& e) {
@@ -169,10 +164,8 @@ public:
         
         try {
             spdlog::debug("Creating ObservationManager...");
-            spdlog::default_logger()->flush();
             observation_manager = std::make_unique<ObservationManager>(cfg["observations"], this);
             spdlog::debug("ObservationManager created successfully");
-            spdlog::default_logger()->flush();
         } catch (const std::exception& e) {
             spdlog::error("Failed to create ObservationManager: {}", e.what());
             throw;
@@ -211,30 +204,8 @@ public:
         
         episode_length += 1;
         robot->update();
-        auto obs_map = observation_manager->compute();
-        
-        // Debug: Print observation size for first few steps
-        static int obs_debug_count = 0;
-        if (obs_debug_count++ < 5) {
-            // Extract the "obs" group vector from the map for debugging
-            if (obs_map.find("obs") != obs_map.end()) {
-                const auto& obs_vec = obs_map.at("obs");
-                spdlog::info("[OBS SIZE DEBUG] Step {}: obs size = {} (expected 585)", obs_debug_count, obs_vec.size());
-                if (obs_vec.size() != 585) {
-                    spdlog::error("[CRITICAL] Observation size mismatch! Expected 585, got {}", obs_vec.size());
-                }
-                // Print first 20 values for debugging
-                if (obs_vec.size() >= 20) {
-                    spdlog::info("[OBS DEBUG] First 20 values: [{:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}, {:.4f}]",
-                        obs_vec[0], obs_vec[1], obs_vec[2], obs_vec[3], obs_vec[4], obs_vec[5], obs_vec[6], obs_vec[7], obs_vec[8], obs_vec[9],
-                        obs_vec[10], obs_vec[11], obs_vec[12], obs_vec[13], obs_vec[14], obs_vec[15], obs_vec[16], obs_vec[17], obs_vec[18], obs_vec[19]);
-                }
-            } else {
-                spdlog::error("[CRITICAL] Observation group 'obs' not found in compute() result!");
-            }
-        }
-        
-        auto action = alg->act(obs_map);
+        auto obs = observation_manager->compute();
+        auto action = alg->act(obs);
         action_manager->process_action(action);
         
         // Increment step counter for dumps

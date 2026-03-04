@@ -67,36 +67,19 @@ inline Transform jointTransform(const Eigen::Vector3f& axis, float angle) {
 
 // ============================================================================
 // G1 29-DOF Robot Kinematic Structure (from g1_29dof.xml)
+// Joint order matches SDK order in deploy.yaml
 // ============================================================================
-//
-// IMPORTANT: joint_pos is in POLICY order (after joint_ids_map remapping), NOT SDK order!
-//
-// joint_ids_map: [0, 6, 12, 1, 7, 13, 2, 8, 14, 3, 9, 15, 22, 4, 10, 16, 23, 5, 11, 17, 24, 18, 25, 19, 26, 20, 27, 21, 28]
-//
-// SDK order (physical robot):
-//   Left leg:  0=hip_pitch, 1=hip_roll, 2=hip_yaw, 3=knee, 4=ankle_pitch, 5=ankle_roll
-//   Right leg: 6=hip_pitch, 7=hip_roll, 8=hip_yaw, 9=knee, 10=ankle_pitch, 11=ankle_roll
-//   Waist: 12=yaw, 13=roll, 14=pitch
-//   Left arm:  15=shoulder_pitch, 16=shoulder_roll, 17=shoulder_yaw, 18=elbow, 19=wrist_roll, 20=wrist_pitch, 21=wrist_yaw
-//   Right arm: 22=shoulder_pitch, 23=shoulder_roll, 24=shoulder_yaw, 25=elbow, 26=wrist_roll, 27=wrist_pitch, 28=wrist_yaw
-//
-// Policy order (after joint_ids_map remapping):
-//   [0]=SDK0, [1]=SDK6, [2]=SDK12, [3]=SDK1, [4]=SDK7, [5]=SDK13, [6]=SDK2, [7]=SDK8, [8]=SDK14,
-//   [9]=SDK3, [10]=SDK9, [11]=SDK15, [12]=SDK22, [13]=SDK4, [14]=SDK10, [15]=SDK16, [16]=SDK23,
-//   [17]=SDK5, [18]=SDK11, [19]=SDK17, [20]=SDK24, [21]=SDK18, [22]=SDK25, [23]=SDK19, [24]=SDK26,
-//   [25]=SDK20, [26]=SDK27, [27]=SDK21, [28]=SDK28
-//
-// Inverse mapping (SDK index -> Policy index):
-//   SDK 0->0, 1->3, 2->6, 3->9, 4->13, 5->17 (left leg)
-//   SDK 6->1, 7->4, 8->7, 9->10, 10->14, 11->18 (right leg)
-//   SDK 12->2, 13->5, 14->8 (waist)
-//   SDK 15->11, 16->15, 17->19, 18->21, 19->23, 20->25, 21->27 (left arm)
-//   SDK 22->12, 23->16, 24->20, 25->22, 26->24, 27->26, 28->28 (right arm)
-// ============================================================================
+
+// Joint indices in SDK order (from deploy.yaml joint_ids_map)
+// SDK order: [left_hip_pitch, left_hip_roll, left_hip_yaw, left_knee, left_ankle_pitch, left_ankle_roll,
+//             right_hip_pitch, right_hip_roll, right_hip_yaw, right_knee, right_ankle_pitch, right_ankle_roll,
+//             waist_yaw, waist_roll, waist_pitch,
+//             left_shoulder_pitch, left_shoulder_roll, left_shoulder_yaw, left_elbow, left_wrist_roll, left_wrist_pitch, left_wrist_yaw,
+//             right_shoulder_pitch, right_shoulder_roll, right_shoulder_yaw, right_elbow, right_wrist_roll, right_wrist_pitch, right_wrist_yaw]
 
 inline Eigen::Vector3f computeKeyBodyPosition_G1(
     const std::string& body_name,
-    const std::vector<float>& joint_pos  // Joint positions in POLICY order (after joint_ids_map)
+    const std::vector<float>& joint_pos  // Joint positions in SDK order
 ) {
     // Joint axes (from XML)
     const Eigen::Vector3f AXIS_X(1.0f, 0.0f, 0.0f);
@@ -143,48 +126,41 @@ inline Eigen::Vector3f computeKeyBodyPosition_G1(
     auto T_right_wrist_roll_to_pitch = makeTransform(Eigen::Vector3f(0.038f, 0.0f, 0.0f));
     auto T_right_wrist_pitch_to_yaw = makeTransform(Eigen::Vector3f(0.046f, 0.0f, 0.0f));
     
-    // Extract joint angles using POLICY order indices (NOT SDK order!)
-    // The joint_pos array is in policy order after joint_ids_map remapping.
-    // We use the inverse mapping: SDK index -> Policy index
-    // 
-    // Left leg (SDK 0-5 -> Policy 0,3,6,9,13,17):
-    float left_hip_pitch = joint_pos.size() > 0 ? joint_pos[0] : 0.0f;    // SDK 0 -> Policy 0
-    float left_hip_roll = joint_pos.size() > 3 ? joint_pos[3] : 0.0f;     // SDK 1 -> Policy 3
-    float left_hip_yaw = joint_pos.size() > 6 ? joint_pos[6] : 0.0f;      // SDK 2 -> Policy 6
-    float left_knee = joint_pos.size() > 9 ? joint_pos[9] : 0.0f;         // SDK 3 -> Policy 9
-    float left_ankle_pitch = joint_pos.size() > 13 ? joint_pos[13] : 0.0f; // SDK 4 -> Policy 13
-    float left_ankle_roll = joint_pos.size() > 17 ? joint_pos[17] : 0.0f;  // SDK 5 -> Policy 17
+    // Extract joint angles (SDK order indices)
+    // Left leg: 0-5, Right leg: 6-11, Waist: 12-14, Left arm: 15-21, Right arm: 22-28
+    float left_hip_pitch = joint_pos.size() > 0 ? joint_pos[0] : 0.0f;
+    float left_hip_roll = joint_pos.size() > 1 ? joint_pos[1] : 0.0f;
+    float left_hip_yaw = joint_pos.size() > 2 ? joint_pos[2] : 0.0f;
+    float left_knee = joint_pos.size() > 3 ? joint_pos[3] : 0.0f;
+    float left_ankle_pitch = joint_pos.size() > 4 ? joint_pos[4] : 0.0f;
+    float left_ankle_roll = joint_pos.size() > 5 ? joint_pos[5] : 0.0f;
     
-    // Right leg (SDK 6-11 -> Policy 1,4,7,10,14,18):
-    float right_hip_pitch = joint_pos.size() > 1 ? joint_pos[1] : 0.0f;   // SDK 6 -> Policy 1
-    float right_hip_roll = joint_pos.size() > 4 ? joint_pos[4] : 0.0f;    // SDK 7 -> Policy 4
-    float right_hip_yaw = joint_pos.size() > 7 ? joint_pos[7] : 0.0f;     // SDK 8 -> Policy 7
-    float right_knee = joint_pos.size() > 10 ? joint_pos[10] : 0.0f;      // SDK 9 -> Policy 10
-    float right_ankle_pitch = joint_pos.size() > 14 ? joint_pos[14] : 0.0f; // SDK 10 -> Policy 14
-    float right_ankle_roll = joint_pos.size() > 18 ? joint_pos[18] : 0.0f;  // SDK 11 -> Policy 18
+    float right_hip_pitch = joint_pos.size() > 6 ? joint_pos[6] : 0.0f;
+    float right_hip_roll = joint_pos.size() > 7 ? joint_pos[7] : 0.0f;
+    float right_hip_yaw = joint_pos.size() > 8 ? joint_pos[8] : 0.0f;
+    float right_knee = joint_pos.size() > 9 ? joint_pos[9] : 0.0f;
+    float right_ankle_pitch = joint_pos.size() > 10 ? joint_pos[10] : 0.0f;
+    float right_ankle_roll = joint_pos.size() > 11 ? joint_pos[11] : 0.0f;
     
-    // Waist (SDK 12-14 -> Policy 2,5,8):
-    float waist_yaw = joint_pos.size() > 2 ? joint_pos[2] : 0.0f;         // SDK 12 -> Policy 2
-    float waist_roll = joint_pos.size() > 5 ? joint_pos[5] : 0.0f;        // SDK 13 -> Policy 5
-    float waist_pitch = joint_pos.size() > 8 ? joint_pos[8] : 0.0f;       // SDK 14 -> Policy 8
+    float waist_yaw = joint_pos.size() > 12 ? joint_pos[12] : 0.0f;
+    float waist_roll = joint_pos.size() > 13 ? joint_pos[13] : 0.0f;
+    float waist_pitch = joint_pos.size() > 14 ? joint_pos[14] : 0.0f;
     
-    // Left arm (SDK 15-21 -> Policy 11,15,19,21,23,25,27):
-    float left_shoulder_pitch = joint_pos.size() > 11 ? joint_pos[11] : 0.0f;  // SDK 15 -> Policy 11
-    float left_shoulder_roll = joint_pos.size() > 15 ? joint_pos[15] : 0.0f;   // SDK 16 -> Policy 15
-    float left_shoulder_yaw = joint_pos.size() > 19 ? joint_pos[19] : 0.0f;    // SDK 17 -> Policy 19
-    float left_elbow = joint_pos.size() > 21 ? joint_pos[21] : 0.0f;           // SDK 18 -> Policy 21
-    float left_wrist_roll = joint_pos.size() > 23 ? joint_pos[23] : 0.0f;      // SDK 19 -> Policy 23
-    float left_wrist_pitch = joint_pos.size() > 25 ? joint_pos[25] : 0.0f;     // SDK 20 -> Policy 25
-    float left_wrist_yaw = joint_pos.size() > 27 ? joint_pos[27] : 0.0f;       // SDK 21 -> Policy 27
+    float left_shoulder_pitch = joint_pos.size() > 15 ? joint_pos[15] : 0.0f;
+    float left_shoulder_roll = joint_pos.size() > 16 ? joint_pos[16] : 0.0f;
+    float left_shoulder_yaw = joint_pos.size() > 17 ? joint_pos[17] : 0.0f;
+    float left_elbow = joint_pos.size() > 18 ? joint_pos[18] : 0.0f;
+    float left_wrist_roll = joint_pos.size() > 19 ? joint_pos[19] : 0.0f;
+    float left_wrist_pitch = joint_pos.size() > 20 ? joint_pos[20] : 0.0f;
+    float left_wrist_yaw = joint_pos.size() > 21 ? joint_pos[21] : 0.0f;
     
-    // Right arm (SDK 22-28 -> Policy 12,16,20,22,24,26,28):
-    float right_shoulder_pitch = joint_pos.size() > 12 ? joint_pos[12] : 0.0f; // SDK 22 -> Policy 12
-    float right_shoulder_roll = joint_pos.size() > 16 ? joint_pos[16] : 0.0f;  // SDK 23 -> Policy 16
-    float right_shoulder_yaw = joint_pos.size() > 20 ? joint_pos[20] : 0.0f;   // SDK 24 -> Policy 20
-    float right_elbow = joint_pos.size() > 22 ? joint_pos[22] : 0.0f;          // SDK 25 -> Policy 22
-    float right_wrist_roll = joint_pos.size() > 24 ? joint_pos[24] : 0.0f;     // SDK 26 -> Policy 24
-    float right_wrist_pitch = joint_pos.size() > 26 ? joint_pos[26] : 0.0f;    // SDK 27 -> Policy 26
-    float right_wrist_yaw = joint_pos.size() > 28 ? joint_pos[28] : 0.0f;      // SDK 28 -> Policy 28
+    float right_shoulder_pitch = joint_pos.size() > 22 ? joint_pos[22] : 0.0f;
+    float right_shoulder_roll = joint_pos.size() > 23 ? joint_pos[23] : 0.0f;
+    float right_shoulder_yaw = joint_pos.size() > 24 ? joint_pos[24] : 0.0f;
+    float right_elbow = joint_pos.size() > 25 ? joint_pos[25] : 0.0f;
+    float right_wrist_roll = joint_pos.size() > 26 ? joint_pos[26] : 0.0f;
+    float right_wrist_pitch = joint_pos.size() > 27 ? joint_pos[27] : 0.0f;
+    float right_wrist_yaw = joint_pos.size() > 28 ? joint_pos[28] : 0.0f;
     
     Transform T_result;
     
@@ -543,29 +519,6 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     auto & asset = env->robot;
     auto & root_quat_w = asset->data.root_quat_w;
     
-    // CRITICAL DEBUG: Print raw quaternion from IMU to verify order
-    static int rot_debug_count = 0;
-    bool should_debug_rot = (rot_debug_count++ % 100 == 0);
-    
-    if (should_debug_rot) {
-        spdlog::info("[ROT DEBUG] Raw IMU quaternion (wxyz): w={:.4f}, x={:.4f}, y={:.4f}, z={:.4f}",
-                    root_quat_w.w(), root_quat_w.x(), root_quat_w.y(), root_quat_w.z());
-        
-        // Check if quaternion is normalized
-        float quat_norm = root_quat_w.norm();
-        if (std::abs(quat_norm - 1.0f) > 0.01f) {
-            spdlog::warn("[ROT DEBUG] WARNING: Quaternion not normalized! ||q||={:.4f}", quat_norm);
-        }
-        
-        // For an upright robot, we expect:
-        // - quat ≈ (1, 0, 0, 0) or (w≈1, x≈0, y≈0, z≈small)
-        // If we see w≈0 and x/y/z large, the order might be wrong (SDK might use xyzw)
-        if (std::abs(root_quat_w.w()) < 0.5f && rot_debug_count < 10) {
-            spdlog::warn("[ROT DEBUG] WARNING: w component small ({:.4f})! IMU quaternion order might be (x,y,z,w) not (w,x,y,z)!", root_quat_w.w());
-            spdlog::warn("[ROT DEBUG] If robot is upright, expected w≈1, but got w={:.4f}", root_quat_w.w());
-        }
-    }
-    
     // Extract yaw quaternion (heading only)
     float yaw = std::atan2(2.0f * (root_quat_w.w() * root_quat_w.z() + root_quat_w.x() * root_quat_w.y()),
                            1.0f - 2.0f * (root_quat_w.y() * root_quat_w.y() + root_quat_w.z() * root_quat_w.z()));
@@ -583,19 +536,6 @@ REGISTER_OBSERVATION(root_local_rot_tan_norm)
     // Python uses columns 0 and 2: tan_vec = root_rotm_local[:, 0], norm_vec = root_rotm_local[:, 2]
     Eigen::Vector3f tan_vec = rotm_local.col(0);  // First column
     Eigen::Vector3f norm_vec = rotm_local.col(2);  // Third column
-    
-    if (should_debug_rot) {
-        spdlog::info("[ROT DEBUG] After yaw removal: tan=[{:.4f},{:.4f},{:.4f}], norm=[{:.4f},{:.4f},{:.4f}]",
-                    tan_vec.x(), tan_vec.y(), tan_vec.z(),
-                    norm_vec.x(), norm_vec.y(), norm_vec.z());
-        
-        // For upright robot, expected:
-        // tan ≈ [1, 0, 0] (forward)
-        // norm ≈ [0, 0, 1] (up)
-        if (std::abs(tan_vec.x() - 1.0f) > 0.3f || std::abs(norm_vec.z() - 1.0f) > 0.3f) {
-            spdlog::warn("[ROT DEBUG] WARNING: For upright robot, expected tan≈[1,0,0], norm≈[0,0,1]");
-        }
-    }
     
     // Concatenate: [tan.x, tan.y, tan.z, norm.x, norm.y, norm.z]
     std::vector<float> obs(6);
@@ -628,11 +568,6 @@ REGISTER_OBSERVATION(key_body_pos_b)
     // Implementation matches Python: key_body_pos_b in deepmimic/mdp/observations.py
     // Uses Forward Kinematics computed from joint positions
     
-    // DIAGNOSTIC FLAG: Set to true to use fixed default positions instead of FK
-    // This helps isolate whether FK errors are causing instability
-    // If robot is stable with this = true, then FK is the problem
-    static const bool USE_DEFAULT_POSITIONS = false;  // Set to true to test without FK
-    
     auto & asset = env->robot;
     
     // Get body names from params
@@ -661,114 +596,26 @@ REGISTER_OBSERVATION(key_body_pos_b)
     std::vector<float> obs(num_key_bodies * 3);  // 3D positions
     
     // Get joint positions (already in SDK order from robot data)
-    // CRITICAL: Joint positions should be absolute angles, not relative to default
-    const auto& joint_pos_eigen = asset->data.joint_pos;
-    
-    // Validate joint positions are valid
-    if (joint_pos_eigen.size() < 29) {
-        spdlog::error("[CRITICAL] key_body_pos_b: joint_pos size ({}) < 29! FK will fail!", joint_pos_eigen.size());
-        // Return zeros to avoid crashes, but this will cause policy to fail
-        return std::vector<float>(num_key_bodies * 3, 0.0f);
-    }
-    
     // Convert Eigen vector to std::vector
+    const auto& joint_pos_eigen = asset->data.joint_pos;
     std::vector<float> joint_pos(joint_pos_eigen.data(), joint_pos_eigen.data() + joint_pos_eigen.size());
     
     // Debug logging (prints every 100 calls)
     static int fk_debug_count = 0;
-    bool should_debug = (fk_debug_count++ % 100 == 0);
-    
-    if (should_debug) {
-        // Print joint positions in policy order with joint names for verification
-        // Policy order: [0]=L_hip_p, [1]=R_hip_p, [2]=waist_y, [3]=L_hip_r, [4]=R_hip_r, [5]=waist_r
-        spdlog::info("[FK DEBUG] Joint positions in POLICY order:");
-        spdlog::info("[FK DEBUG]   [0] L_hip_pitch={:.4f}, [1] R_hip_pitch={:.4f}, [2] waist_yaw={:.4f}",
-                    joint_pos[0], joint_pos[1], joint_pos[2]);
-        spdlog::info("[FK DEBUG]   [3] L_hip_roll={:.4f}, [4] R_hip_roll={:.4f}, [5] waist_roll={:.4f}",
-                    joint_pos[3], joint_pos[4], joint_pos[5]);
-        spdlog::info("[FK DEBUG]   Left leg: hip_p[0]={:.3f}, hip_r[3]={:.3f}, hip_y[6]={:.3f}, knee[9]={:.3f}, ank_p[13]={:.3f}, ank_r[17]={:.3f}",
-                    joint_pos[0], joint_pos[3], joint_pos[6], joint_pos[9], joint_pos[13], joint_pos[17]);
-        spdlog::info("[FK DEBUG]   Right leg: hip_p[1]={:.3f}, hip_r[4]={:.3f}, hip_y[7]={:.3f}, knee[10]={:.3f}, ank_p[14]={:.3f}, ank_r[18]={:.3f}",
-                    joint_pos[1], joint_pos[4], joint_pos[7], joint_pos[10], joint_pos[14], joint_pos[18]);
+    if (fk_debug_count++ % 100 == 0) {
+        for (size_t i = 0; i < num_key_bodies; ++i) {
+            Eigen::Vector3f pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
+            spdlog::info("FK[{}] {}: [{:.4f}, {:.4f}, {:.4f}]", 
+                        fk_debug_count, body_names[i], pos.x(), pos.y(), pos.z());
+        }
     }
     
     // Compute FK for each key body
-    bool fk_error = false;
-    bool all_zeros = true;
-    
-    // Default positions at zero pose (pre-computed from Isaac Lab)
-    // These are used for diagnostic testing when USE_DEFAULT_POSITIONS = true
-    static const std::map<std::string, Eigen::Vector3f> default_body_positions = {
-        {"left_ankle_roll_link", Eigen::Vector3f(0.0f, 0.1165f, -0.756f)},
-        {"right_ankle_roll_link", Eigen::Vector3f(0.0f, -0.1165f, -0.756f)},
-        {"left_wrist_yaw_link", Eigen::Vector3f(0.188f, 0.244f, 0.054f)},
-        {"right_wrist_yaw_link", Eigen::Vector3f(0.188f, -0.244f, 0.054f)},
-        {"left_shoulder_roll_link", Eigen::Vector3f(0.0f, 0.138f, 0.292f)},
-        {"right_shoulder_roll_link", Eigen::Vector3f(0.0f, -0.138f, 0.292f)},
-    };
-    
     for (size_t i = 0; i < num_key_bodies; ++i) {
-        Eigen::Vector3f pos;
-        
-        if (USE_DEFAULT_POSITIONS) {
-            // Use fixed default positions for diagnostic testing
-            auto it = default_body_positions.find(body_names[i]);
-            if (it != default_body_positions.end()) {
-                pos = it->second;
-            } else {
-                pos = Eigen::Vector3f::Zero();
-            }
-            if (should_debug && i == 0) {
-                spdlog::warn("[DIAGNOSTIC] Using DEFAULT positions instead of FK!");
-            }
-        } else {
-            // Normal FK computation
-            pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
-        }
-        
-        // Validate FK result
-        if (!std::isfinite(pos.x()) || !std::isfinite(pos.y()) || !std::isfinite(pos.z())) {
-            spdlog::error("[CRITICAL] key_body_pos_b: FK returned NaN/Inf for {}! Joint pos size: {}", 
-                         body_names[i], joint_pos.size());
-            fk_error = true;
-            pos = Eigen::Vector3f::Zero();
-        }
-        
-        // Check if all values are zero (likely FK not working)
-        if (std::abs(pos.x()) > 1e-6f || std::abs(pos.y()) > 1e-6f || std::abs(pos.z()) > 1e-6f) {
-            all_zeros = false;
-        }
-        
-        // Check for unreasonable values (likely FK error)
-        float max_component = std::max({std::abs(pos.x()), std::abs(pos.y()), std::abs(pos.z())});
-        if (max_component > 5.0f) {  // Bodies should be within 5m of pelvis
-            if (should_debug) {
-                spdlog::warn("[FK WARNING] {} position seems wrong: [{:.4f}, {:.4f}, {:.4f}] (max={:.4f}m)",
-                            body_names[i], pos.x(), pos.y(), pos.z(), max_component);
-            }
-        }
-        
+        Eigen::Vector3f pos = computeKeyBodyPosition_G1(body_names[i], joint_pos);
         obs[i * 3 + 0] = pos.x();
         obs[i * 3 + 1] = pos.y();
         obs[i * 3 + 2] = pos.z();
-        
-        if (should_debug) {
-            spdlog::info("[FK DEBUG] {}: [{:.4f}, {:.4f}, {:.4f}]", 
-                        body_names[i], pos.x(), pos.y(), pos.z());
-        }
-    }
-    
-    // CRITICAL: If FK returns all zeros, something is very wrong
-    if (all_zeros && fk_debug_count > 10) {  // Allow a few calls for initialization
-        spdlog::error("[CRITICAL] key_body_pos_b: FK returning all zeros! This will cause policy to fail!");
-        spdlog::error("[CRITICAL] Check: 1) Joint positions valid? 2) FK implementation correct? 3) Body names match?");
-        // Don't return zeros - this will definitely break the policy
-        // Instead, return a small non-zero value to avoid complete failure
-        // But log the error so user knows something is wrong
-    }
-    
-    if (fk_error) {
-        spdlog::error("[CRITICAL] key_body_pos_b: FK computation failed! Check joint positions and FK implementation!");
     }
     
     // Debug instrumentation

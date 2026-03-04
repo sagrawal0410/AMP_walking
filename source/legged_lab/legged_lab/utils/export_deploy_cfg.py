@@ -34,8 +34,15 @@ def format_value(x):
     except:
         pass
     
-    if isinstance(x, float):
+    # Native Python scalars — return as-is (MUST come before the container checks)
+    if isinstance(x, bool):
+        return x
+    elif isinstance(x, int):
+        return x
+    elif isinstance(x, float):
         return float(f"{x:.3g}")
+    elif isinstance(x, str):
+        return x
     elif isinstance(x, (tuple, list)):
         # Convert tuples to lists to avoid !!python/tuple tags in YAML
         return [format_value(i) for i in x]
@@ -47,9 +54,6 @@ def format_value(x):
         return int(x)
     elif isinstance(x, np.floating):
         return float(x)
-    elif isinstance(x, (int, str, bool)):
-        # Handle plain Python int, str, and bool - return as-is
-        return x
     else:
         # For any other type, try to convert or return None
         try:
@@ -530,9 +534,9 @@ def export_deploy_cfg(env: ManagerBasedRLEnv, log_dir):
     # Set use_gym_history and obs_order for AMP policies
     # Note: ObservationManager receives cfg["observations"], so these must be inside observations dict
     if has_amp_terms:
-        # Set use_gym_history to false (per-term history, not interleaved)
-        # This matches Isaac Lab's ObsGroup behavior with history_length > 1
-        # History is structured as: [term1_t0..t4, term2_t0..t4, ...]
+        # Set use_gym_history to false (concatenated history, not interleaved)
+        # This ensures history is concatenated per term: [term1_h0, term1_h1, ..., term1_h4, term2_h0, ...]
+        # Instead of interleaved: [term1_h0, term2_h0, ..., term1_h1, term2_h1, ...]
         cfg["observations"]["use_gym_history"] = False
         # Store observation order explicitly (critical for AMP policies) - filter out None values and ensure strings
         filtered_order = [str(x) for x in obs_order if x is not None and str(x) != "None"]

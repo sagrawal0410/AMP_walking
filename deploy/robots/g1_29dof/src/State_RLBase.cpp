@@ -5,7 +5,6 @@
 #include <unordered_map>
 #include <cmath>
 #include <algorithm>
-#include <numeric>
 
 namespace isaaclab
 {
@@ -15,77 +14,62 @@ REGISTER_OBSERVATION(keyboard_velocity_commands)
 {
     std::string key = FSMState::keyboard->key();
     static auto cfg = env->cfg["commands"]["base_velocity"]["ranges"];
-    
-    // Key command mappings - must be defined BEFORE use
-    static std::unordered_map<std::string, std::vector<float>> key_commands = {
-        // Letter keys
-        {"w", {0.4f, 0.0f, 0.0f}},    // Walk forward
-        {"s", {-0.3f, 0.0f, 0.0f}},   // Walk backward
-        {"a", {0.0f, 0.25f, 0.0f}},   // Strafe left
-        {"d", {0.0f, -0.25f, 0.0f}},  // Strafe right
-        {"q", {0.0f, 0.0f, 0.5f}},    // Turn left
-        {"e", {0.0f, 0.0f, -0.5f}},   // Turn right
-        // Arrow keys (if keyboard returns these)
-        {"up", {0.4f, 0.0f, 0.0f}},
-        {"down", {-0.3f, 0.0f, 0.0f}},
-        {"left", {0.0f, 0.25f, 0.0f}},
-        {"right", {0.0f, -0.25f, 0.0f}},
-        // Space to stop
-        {"space", {0.0f, 0.0f, 0.0f}}
-    };
-    
-    // Log key presses for debugging
+       
     static std::string last_logged_key = "";
     if(key != last_logged_key && !key.empty()) {
-        bool key_found = key_commands.find(key) != key_commands.end();
-        if (key_found) {
-            spdlog::info("Key detected: '{}' -> Command will be updated", key);
-        } else {
-            spdlog::warn("Key detected: '{}' -> NOT IN KEY MAP! Available: w,s,a,d,q,e,up,down,left,right,space", key);
-        }
+        spdlog::info("Key detected: '{}' -> Command will be generated", key);
         last_logged_key = key;
     }
+
+    // Optimized keyboard values based on curriculum training analysis
+    // Forward/backward: policy generalizes well beyond training range (trained 0.1, works at 0.4)
+    // Lateral/turning: limited to 50% of training max (NO curriculum, stayed at 0.1 entire training)
+    static std::unordered_map<std::string, std::vector<float>> key_commands = {
+        {"w", {0.4f, 0.0f, 0.0f}},    // Walk forward - generalizes well
+        {"s", {-0.3f, 0.0f, 0.0f}},   // Walk backward - generalizes well  
+        {"a", {0.0f, 0.05f, 0.0f}},   // Strafe left (50% of training max)
+        {"d", {0.0f, -0.05f, 0.0f}},  // Strafe right (50% of training max)
+        {"q", {0.0f, 0.0f, 0.05f}},   // Turn left (50% max - CRITICAL: no ang curriculum)
+        {"e", {0.0f, 0.0f, -0.05f}}   // Turn right (50% max - CRITICAL: no ang curriculum)
+    };
     
-    // Maintain last command state (static) to avoid jumping to zero when no key is pressed
-    // This matches training behavior where commands persist until changed
-    static std::vector<float> cmd = {0.0f, 0.0f, 0.0f};
-    static std::string last_processed_key = "";
+    // Smooth velocity command with exponential smoothing
+    static std::vector<float> current_cmd = {0.0f, 0.0f, 0.0f};
+    static std::vector<float> target_cmd = {0.0f, 0.0f, 0.0f};
+    const float smoothing = 0.15f;  // Smooth acceleration (lower = smoother)
     
-    // Only update command when a NEW valid key is pressed (not on every call)
-    // This ensures consistency when observation is called multiple times per step
-    if (!key.empty() && key != last_processed_key && key_commands.find(key) != key_commands.end())
+    // Update target based on key press
+    if (key_commands.find(key) != key_commands.end())
     {
-        cmd = key_commands[key];
-        last_processed_key = key;
-        spdlog::info("Command updated: [{:.3f}, {:.3f}, {:.3f}]", cmd[0], cmd[1], cmd[2]);
+        target_cmd = key_commands[key];
+        spdlog::info("Command: [{:.3f}, {:.3f}, {:.3f}]", target_cmd[0], target_cmd[1], target_cmd[2]);
     }
-    else if (key.empty())
+    else
     {
-        // When no key is pressed, clear the last processed key but keep the command
-        // This allows the same key to be processed again if pressed later
-        last_processed_key = "";
+        target_cmd = {0.0f, 0.0f, 0.0f};  // Stop when no key pressed
     }
-    // If no key pressed or same key, cmd retains its previous value (don't reset to zero)
     
-    // Clamp to training ranges (matching velocity_commands behavior)
-    cmd[0] = std::clamp(cmd[0], cfg["lin_vel_x"][0].as<float>(), cfg["lin_vel_x"][1].as<float>());
-    cmd[1] = std::clamp(cmd[1], cfg["lin_vel_y"][0].as<float>(), cfg["lin_vel_y"][1].as<float>());
-    cmd[2] = std::clamp(cmd[2], cfg["ang_vel_z"][0].as<float>(), cfg["ang_vel_z"][1].as<float>());
+    // Smooth interpolation to target
+    for(size_t i = 0; i < 3; i++) {
+        current_cmd[i] += (target_cmd[i] - current_cmd[i]) * smoothing;
+        // Deadzone for near-zero values
+        if(std::abs(current_cmd[i]) < 0.01f) current_cmd[i] = 0.0f;
+    }
     
     // Debug instrumentation
     if (isaaclab::debug::is_debug_enabled()) {
         static int call_count = 0;
         if (call_count++ % 50 == 0) {
-            isaaclab::debug::print_stats(cmd, "keyboard_velocity_commands");
-            isaaclab::debug::print_first(cmd, "keyboard_velocity_commands", 3);
-            isaaclab::debug::check_finite(cmd, "keyboard_velocity_commands");
+            isaaclab::debug::print_stats(current_cmd, "keyboard_velocity_commands");
+            isaaclab::debug::print_first(current_cmd, "keyboard_velocity_commands", 3);
+            isaaclab::debug::check_finite(current_cmd, "keyboard_velocity_commands");
             spdlog::info("[DEBUG] keyboard_velocity_commands: [vx={:.4f}, vy={:.4f}, yaw_rate={:.4f}]", 
-                        cmd[0], cmd[1], cmd[2]);
+                        current_cmd[0], current_cmd[1], current_cmd[2]);
             spdlog::info("[DEBUG] keyboard_velocity_commands: ranges should match training: lin_vel_x[-0.5,3.0], lin_vel_y[-0.5,0.5], ang_vel_z[-1.0,1.0]");
         }
     }
     
-    return cmd;
+    return current_cmd;
 }
 
 }
@@ -161,78 +145,16 @@ State_RLBase::State_RLBase(int state_mode, std::string state_string)
 
 void State_RLBase::run()
 {
-    // Action smoothing: 0.0 = no smoothing (responsive), 1.0 = full smoothing (slow)
-    // Lower values = faster response, needed for balance recovery
-    // REDUCED from 0.5 to 0.2 to allow faster balance corrections
-    static const float ACTION_SMOOTHING = 0.2f;
-    static std::vector<float> smoothed_action;
-    static int warmup_frames = 0;
-    static const int WARMUP_FRAMES = 5;  // Skip first few frames for policy to warm up
-    
     auto action = env->action_manager->processed_actions();
-    
-    // Diagnostic: Log action statistics periodically
-    static int action_diag_count = 0;
-    if (action_diag_count++ % 100 == 0 && !action.empty()) {
-        float action_max = *std::max_element(action.begin(), action.end(), 
-            [](float a, float b) { return std::abs(a) < std::abs(b); });
-        float action_mean = std::accumulate(action.begin(), action.end(), 0.0f) / action.size();
-        int action_nonzero = std::count_if(action.begin(), action.end(), 
-            [](float a) { return std::abs(a) > 0.01f; });
-        spdlog::info("[ACTION DIAG] Processed actions: max_abs={:.4f} rad, mean={:.4f}, nonzero={}/{}", 
-                    std::abs(action_max), action_mean, action_nonzero, action.size());
-        if (std::abs(action_max) < 0.1f) {
-            spdlog::warn("[ACTION DIAG] WARNING: Actions very small (<0.1 rad)! Robot may not move.");
-        }
-        if (std::abs(action_max) > 2.0f) {
-            spdlog::warn("[ACTION DIAG] WARNING: Actions very large (>2.0 rad)! May cause instability.");
-        }
-    }
-    
-    // During warmup, hold current positions to let policy stabilize
-    if (warmup_frames < WARMUP_FRAMES) {
-        warmup_frames++;
-        spdlog::info("[WARMUP] Frame {}/{} - holding current positions", warmup_frames, WARMUP_FRAMES);
-        // Keep current joint positions during warmup
-        for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
-            int motor_idx = env->robot->data.joint_ids_map[i];
-            lowcmd->msg_.motor_cmd()[motor_idx].q() = lowstate->msg_.motor_state()[motor_idx].q();
-        }
-        return;
-    }
-    
-    // Initialize smoothed action with CURRENT joint positions (not zeros!)
-    // This prevents the initial jump when transitioning to velocity mode
-    if (smoothed_action.empty()) {
-        smoothed_action.resize(action.size());
-        for (size_t i = 0; i < action.size(); ++i) {
-            int motor_idx = env->robot->data.joint_ids_map[i];
-            // Start from current position, not from action (which may be zero initially)
-            smoothed_action[i] = lowstate->msg_.motor_state()[motor_idx].q();
-        }
-        spdlog::info("[INIT] Smoothed action initialized from current joint positions");
-    }
-    
     for(int i(0); i < env->robot->data.joint_ids_map.size(); i++) {
+        lowcmd->msg_.motor_cmd()[env->robot->data.joint_ids_map[i]].q() = action[i];
         float action_val = action[i];
         int motor_idx = env->robot->data.joint_ids_map[i];
-        
-        // Validate action
         if(!std::isfinite(action_val)) {
             spdlog::error("Invalid action[{}]: {} (NaN/Inf detected)! Using current position.", i, action_val);
             action_val = lowstate->msg_.motor_state()[motor_idx].q();
         }
-        
-        // Apply smoothing: blend between previous smoothed action and new action
-        // smoothed = alpha * old + (1-alpha) * new
-        if (ACTION_SMOOTHING > 0.0f && i < smoothed_action.size()) {
-            smoothed_action[i] = ACTION_SMOOTHING * smoothed_action[i] + (1.0f - ACTION_SMOOTHING) * action_val;
-            action_val = smoothed_action[i];
-        }
-        
-        // Clamp to reasonable joint position limits
-        action_val = std::clamp(action_val, -3.14f, 3.14f);
-        
+        action_val = std::clamp(action_val, -1.0f, 1.0f);
         lowcmd->msg_.motor_cmd()[motor_idx].q() = action_val;
     }
 }
