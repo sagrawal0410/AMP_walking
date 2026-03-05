@@ -617,24 +617,18 @@ class AmpController:
             time.sleep(0.01)
         print("[CTRL] Robot state received!")
 
-        # ── Setup keyboard (hold-to-move with smooth decay) ──
+        # ── Setup keyboard (incremental velocity — each press adds delta, persists) ──
         transition_request = [None]
-        held_keys = set()  # track which movement keys are currently held
 
-        # ── Velocity targets when key is held ──
-        KEY_VELOCITIES = {
-            'w': np.array([ 1.0,  0.0,  0.0]),   # forward
-            's': np.array([-1.0,  0.0,  0.0]),   # backward
-            'a': np.array([ 0.0,  0.5, 0.0]),   # strafe left
-            'd': np.array([ 0.0, -0.5, 0.0]),   # strafe right
-            'q': np.array([ 0.0,  0.0,  0.5]),  # turn left
-            'e': np.array([ 0.0,  0.0, -0.5]),  # turn right
+        # ── Velocity deltas per key press ──
+        VEL_DELTA = {
+            'w': np.array([ 0.2,  0.0,  0.0]),   # forward
+            's': np.array([-0.2,  0.0,  0.0]),   # backward
+            'a': np.array([ 0.0,  0.1,  0.0]),   # strafe left
+            'd': np.array([ 0.0, -0.1,  0.0]),   # strafe right
+            'q': np.array([ 0.0,  0.0,  0.1]),   # turn left
+            'e': np.array([ 0.0,  0.0, -0.1]),   # turn right
         }
-        # Smoothing factor (matches C++ controller's 0.15 exponential smoothing).
-        # At 50Hz with 0.15: reaches ~50% in 200ms, ~95% in 600ms.
-        # Keep this LOW — the policy was trained with commands held constant
-        # for long periods, so rapid changes destabilize it.
-        SMOOTHING = 0.00
 
         if PYNPUT_AVAILABLE:
             def on_key_press(key):
@@ -649,11 +643,12 @@ class AmpController:
                             transition_request[0] = FSMState.VELOCITY
                     elif hasattr(key, 'char') and key.char:
                         c = key.char.lower()
-                        if c in KEY_VELOCITIES:
-                            held_keys.add(c)
+                        if c in VEL_DELTA:
+                            self.command_vel += VEL_DELTA[c]
+                            print(f"[CMD] vel=[{self.command_vel[0]:.2f}, "
+                                  f"{self.command_vel[1]:.2f}, {self.command_vel[2]:.2f}]")
                         elif c == ' ':
                             self.command_vel[:] = 0.0
-                            held_keys.clear()
                             print("[CMD] Velocity zeroed")
                         elif c == 'p':
                             if self.fsm_state == FSMState.VELOCITY:
@@ -661,17 +656,7 @@ class AmpController:
                 except Exception:
                     pass
 
-            def on_key_release(key):
-                try:
-                    if hasattr(key, 'char') and key.char:
-                        held_keys.discard(key.char.lower())
-                except Exception:
-                    pass
-
-            listener = pynput_keyboard.Listener(
-                on_press=on_key_press,
-                on_release=on_key_release,
-            )
+            listener = pynput_keyboard.Listener(on_press=on_key_press)
             listener.start()
         else:
             print("[WARNING] pynput not installed — no keyboard control")
@@ -726,21 +711,6 @@ class AmpController:
                             buf.reset()
                         self.raw_action[:] = 0.0
                     print(f"[FSM] {old_name} → {new_state.name}")
-
-                # ── Smooth velocity: exponential smoothing toward target ──
-                # Same approach as C++ controller: smoothly interpolate toward
-                # target (key-held) or zero (no key), using a single rate.
-                if self.fsm_state == FSMState.VELOCITY:
-                    target = np.zeros(3)
-                    if held_keys:
-                        for k in held_keys:
-                            if k in KEY_VELOCITIES:
-                                target += KEY_VELOCITIES[k]
-                    # Smooth interpolation: same rate for attack AND decay
-                    self.command_vel += (target - self.command_vel) * SMOOTHING
-                    # Deadzone: snap to zero when very small
-                    mask = np.abs(self.command_vel) < 0.01
-                    self.command_vel[mask] = 0.0
 
                 # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
