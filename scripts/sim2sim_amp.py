@@ -727,14 +727,20 @@ class AmpController:
                         self.raw_action[:] = 0.0
                     print(f"[FSM] {old_name} → {new_state.name}")
 
-                # ── Velocity command: instant set from held keys ──
+                # ── Smooth velocity: exponential smoothing toward target ──
+                # Same approach as C++ controller: smoothly interpolate toward
+                # target (key-held) or zero (no key), using a single rate.
                 if self.fsm_state == FSMState.VELOCITY:
                     target = np.zeros(3)
                     if held_keys:
                         for k in held_keys:
                             if k in KEY_VELOCITIES:
                                 target += KEY_VELOCITIES[k]
-                    self.command_vel[:] = target
+                    # Smooth interpolation: same rate for attack AND decay
+                    self.command_vel += (target - self.command_vel) * SMOOTHING
+                    # Deadzone: snap to zero when very small
+                    mask = np.abs(self.command_vel) < 0.01
+                    self.command_vel[mask] = 0.0
 
                 # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
