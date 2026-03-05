@@ -742,14 +742,6 @@ class AmpController:
                     mask = np.abs(self.command_vel) < 0.01
                     self.command_vel[mask] = 0.0
 
-                # ── Automatic random push (in VELOCITY mode only) ──
-                if (self.fsm_state == FSMState.VELOCITY
-                        and AUTO_PUSH_INTERVAL_S > 0
-                        and self.push_steps_remaining == 0):
-                    if time.time() - self.last_auto_push_time > AUTO_PUSH_INTERVAL_S:
-                        self.trigger_push()
-                        self.last_auto_push_time = time.time()
-
                 # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
                     if not self.check_orientation(imu_quat):
