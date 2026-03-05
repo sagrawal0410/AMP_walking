@@ -555,15 +555,33 @@ class AmpController:
         return cos_angle > np.cos(np.radians(60.0))
 
     def trigger_push(self):
-        """Apply a random torque push to the hip joints for PUSH_DURATION_STEPS."""
+        """Apply a random-direction torque push to the hip joints for PUSH_DURATION_STEPS.
+
+        Picks a random 2D direction (angle on the XY plane), then projects it
+        onto the hip pitch (forward/back) and hip roll (lateral) joints so the
+        push feels like a shove from a random direction, not just random
+        independent joint torques.
+        """
         self.push_torques[:] = 0.0
-        for j in PUSH_JOINTS_SDK:
-            self.push_torques[j] = np.random.uniform(*PUSH_TORQUE_RANGE)
+        # Random direction on the XY plane
+        angle = np.random.uniform(0, 2 * np.pi)
+        magnitude = np.random.uniform(PUSH_TORQUE_RANGE[1] * 0.5, PUSH_TORQUE_RANGE[1])
+        pitch_component = magnitude * np.cos(angle)  # forward/backward
+        roll_component = magnitude * np.sin(angle)    # lateral
+
+        # Apply to both left and right hip pitch/roll (same sign = body push)
+        # SDK indices: 0=left_hip_pitch, 1=left_hip_roll, 6=right_hip_pitch, 7=right_hip_roll
+        self.push_torques[0] = pitch_component   # left hip pitch
+        self.push_torques[6] = pitch_component   # right hip pitch
+        self.push_torques[1] = roll_component    # left hip roll
+        self.push_torques[7] = roll_component    # right hip roll
+
         self.push_steps_remaining = PUSH_DURATION_STEPS
-        direction = "FWD" if self.push_torques[0] > 0 else "BWD"
-        magnitude = np.max(np.abs(self.push_torques))
-        print(f"[PUSH] Applied! dir={direction} mag={magnitude:.1f}Nm "
-              f"duration={PUSH_DURATION_STEPS} steps")
+        dir_deg = np.degrees(angle)
+        dir_name = ["FWD", "FWD-RIGHT", "RIGHT", "BWD-RIGHT",
+                     "BWD", "BWD-LEFT", "LEFT", "FWD-LEFT"][int((dir_deg + 22.5) % 360 / 45)]
+        print(f"[PUSH] {dir_name} ({dir_deg:.0f}°) mag={magnitude:.1f}Nm "
+              f"pitch={pitch_component:+.1f} roll={roll_component:+.1f}")
 
     # ──────────────────────────────────────────────────────────────────────
     # Main control loop
