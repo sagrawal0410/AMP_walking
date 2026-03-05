@@ -634,7 +634,7 @@ class AmpController:
         # At 50Hz with 0.15: reaches ~50% in 200ms, ~95% in 600ms.
         # Keep this LOW — the policy was trained with commands held constant
         # for long periods, so rapid changes destabilize it.
-        SMOOTHING = 0.50
+        SMOOTHING = 0.00
 
         if PYNPUT_AVAILABLE:
             def on_key_press(key):
