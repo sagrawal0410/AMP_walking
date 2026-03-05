@@ -28,32 +28,11 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedEnv
 
 
-@configclass
-class SmoothedVelocityCommandCfg(UniformVelocityCommandCfg):
-    """Configuration for smoothed velocity command generator.
-
-    Adds exponential smoothing and random release events on top of
-    the standard uniform velocity command.
-    """
-
-    class_type: type = None  # Will be set after class definition
-
-    # Exponential smoothing factor (per policy step).
-    # 0.05 = slow ramp (~1s to 95%), 0.15 = fast ramp (~400ms to 95%)
-    # Should match the SMOOTHING value used in the deployment controller.
-    smoothing: float = 0.15
-
-    # Probability per step that the target will "release" to zero
-    # (simulating the user releasing the key). Higher = more frequent stops.
-    # At 50Hz with 0.002, average hold time ≈ 10s; with 0.01, ≈ 2s
-    release_prob_per_step: float = 0.005
-
-    # Once released, time range (seconds) before a new target is sampled
-    release_duration_range: tuple[float, float] = (0.5, 3.0)
-
-    # Fraction of envs that use smoothing (rest use standard hold behavior
-    # for diversity). Set to 1.0 to apply smoothing to all envs.
-    smoothed_env_fraction: float = 0.5
+# ── Implementation first (needs to be defined before the Cfg so we can
+#    assign class_type = SmoothedVelocityCommand directly in the dataclass
+#    field, which is how Isaac Lab's @configclass expects it).
+#    Type annotations like `cfg: SmoothedVelocityCommandCfg` are safe because
+#    `from __future__ import annotations` makes them lazy strings. ──
 
 
 class SmoothedVelocityCommand(UniformVelocityCommand):
@@ -182,5 +161,33 @@ class SmoothedVelocityCommand(UniformVelocityCommand):
             self.vel_command_b[standing_smoothed] = 0.0
 
 
-# Set the class_type after definition
-SmoothedVelocityCommandCfg.class_type = SmoothedVelocityCommand
+# ── Configuration (defined AFTER the implementation class so we can
+#    assign class_type directly in the field default) ──
+
+
+@configclass
+class SmoothedVelocityCommandCfg(UniformVelocityCommandCfg):
+    """Configuration for smoothed velocity command generator.
+
+    Adds exponential smoothing and random release events on top of
+    the standard uniform velocity command.
+    """
+
+    class_type: type = SmoothedVelocityCommand
+
+    # Exponential smoothing factor (per policy step).
+    # 0.05 = slow ramp (~1s to 95%), 0.15 = fast ramp (~400ms to 95%)
+    # Should match the SMOOTHING value used in the deployment controller.
+    smoothing: float = 0.15
+
+    # Probability per step that the target will "release" to zero
+    # (simulating the user releasing the key). Higher = more frequent stops.
+    # At 50Hz with 0.002, average hold time ≈ 10s; with 0.01, ≈ 2s
+    release_prob_per_step: float = 0.005
+
+    # Once released, time range (seconds) before a new target is sampled
+    release_duration_range: tuple[float, float] = (0.5, 3.0)
+
+    # Fraction of envs that use smoothing (rest use standard hold behavior
+    # for diversity). Set to 1.0 to apply smoothing to all envs.
+    smoothed_env_fraction: float = 0.5
