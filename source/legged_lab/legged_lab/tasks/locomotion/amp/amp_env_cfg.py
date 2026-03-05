@@ -78,7 +78,7 @@ class AmpSceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     """Command specifications for the MDP."""
 
-    base_velocity = mdp.UniformVelocityCommandCfg(
+    base_velocity = mdp.SmoothedVelocityCommandCfg(
         asset_name="robot",
         resampling_time_range=(10.0, 10.0),
         rel_standing_envs=0.02,
@@ -86,9 +86,14 @@ class CommandsCfg:
         heading_command=True,
         heading_control_stiffness=0.5,
         debug_vis=True,
-        ranges=mdp.UniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-0.1, 0.1), lin_vel_y=(-0.1, 0.1), ang_vel_z=(-0.1, 0.1), heading=(-math.pi, math.pi)
+        ranges=mdp.SmoothedVelocityCommandCfg.Ranges(
+            lin_vel_x=(-1.0, 1.0), lin_vel_y=(-0.2, 0.2), ang_vel_z=(-0.2, 0.2), heading=(-math.pi, math.pi)
         ),
+        # Smoothing parameters — match deployment controller
+        smoothing=0.15,
+        release_prob_per_step=0.005,
+        release_duration_range=(0.5, 3.0),
+        smoothed_env_fraction=0.5,
     )
 
 
