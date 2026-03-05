@@ -30,6 +30,7 @@ Controls (keyboard):
   ↓  : Any → PASSIVE
   W/S/A/D/Q/E : velocity commands (only in VELOCITY mode)
   Space : zero velocity
+  P     : apply random push perturbation
 """
 
 import argparse
@@ -107,6 +108,15 @@ class FSMState(Enum):
     PASSIVE = 1
     FIXSTAND = 2
     VELOCITY = 3
+
+
+# ── Perturbation config ──
+# Keyboard push: applies a brief torque pulse to hip joints to simulate external push
+PUSH_TORQUE_RANGE = (-40.0, 40.0)   # Nm range for random push (per joint)
+PUSH_DURATION_STEPS = 10            # Number of control steps the push lasts (~200ms at 50Hz)
+PUSH_JOINTS_SDK = [0, 1, 6, 7]     # Hip pitch/roll joints (SDK indices) — best proxy for body push
+# Automatic random push interval (set to 0 to disable)
+AUTO_PUSH_INTERVAL_S = 5.0          # seconds between automatic pushes (0 = disabled)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -414,6 +424,11 @@ class AmpController:
         self.fsm_start_time = time.time()
         self.fixstand_start_pos = None
 
+        # ── Perturbation state ──
+        self.push_steps_remaining = 0
+        self.push_torques = np.zeros(NUM_JOINTS, dtype=np.float32)
+        self.last_auto_push_time = time.time()
+
         # ── Sensor data (updated by DDS callback) ──
         self.imu_quat_wxyz = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self.imu_gyro = np.zeros(3, dtype=np.float32)
@@ -539,6 +554,17 @@ class AmpController:
         cos_angle = R[2, 2]  # z-axis of body dotted with world z
         return cos_angle > np.cos(np.radians(60.0))
 
+    def trigger_push(self):
+        """Apply a random torque push to the hip joints for PUSH_DURATION_STEPS."""
+        self.push_torques[:] = 0.0
+        for j in PUSH_JOINTS_SDK:
+            self.push_torques[j] = np.random.uniform(*PUSH_TORQUE_RANGE)
+        self.push_steps_remaining = PUSH_DURATION_STEPS
+        direction = "FWD" if self.push_torques[0] > 0 else "BWD"
+        magnitude = np.max(np.abs(self.push_torques))
+        print(f"[PUSH] Applied! dir={direction} mag={magnitude:.1f}Nm "
+              f"duration={PUSH_DURATION_STEPS} steps")
+
     # ──────────────────────────────────────────────────────────────────────
     # Main control loop
     # ──────────────────────────────────────────────────────────────────────
@@ -581,10 +607,10 @@ class AmpController:
         KEY_VELOCITIES = {
             'w': np.array([ 1.0,  0.0,  0.0]),   # forward
             's': np.array([-1.0,  0.0,  0.0]),   # backward
-            'a': np.array([ 0.0,  0.2, 0.0]),   # strafe left
-            'd': np.array([ 0.0, -0.2, 0.0]),   # strafe right
-            'q': np.array([ 0.0,  0.0,  0.2]),  # turn left
-            'e': np.array([ 0.0,  0.0, -0.2]),  # turn right
+            'a': np.array([ 0.0,  0.5, 0.0]),   # strafe left
+            'd': np.array([ 0.0, -0.5, 0.0]),   # strafe right
+            'q': np.array([ 0.0,  0.0,  0.5]),  # turn left
+            'e': np.array([ 0.0,  0.0, -0.5]),  # turn right
         }
         # Smoothing factor (matches C++ controller's 0.15 exponential smoothing).
         # At 50Hz with 0.15: reaches ~50% in 200ms, ~95% in 600ms.
@@ -611,6 +637,9 @@ class AmpController:
                             self.command_vel[:] = 0.0
                             held_keys.clear()
                             print("[CMD] Velocity zeroed")
+                        elif c == 'p':
+                            if self.fsm_state == FSMState.VELOCITY:
+                                self.trigger_push()
                 except Exception:
                     pass
 
@@ -645,7 +674,10 @@ class AmpController:
         print("    A/D  : Left/right strafe")
         print("    Q/E  : Turn left/right")
         print("    Space: Zero velocity command")
+        print("    P    : Random push perturbation")
         print("    Ctrl+C: Emergency stop & exit")
+        push_status = f"every {AUTO_PUSH_INTERVAL_S}s" if AUTO_PUSH_INTERVAL_S > 0 else "disabled"
+        print(f"\n  Auto-push: {push_status}  |  Push force: ±{PUSH_TORQUE_RANGE[1]:.0f} Nm")
         print("=" * 60 + "\n")
 
         # ── Control loop ──
@@ -691,6 +723,14 @@ class AmpController:
                     # Deadzone: snap to zero when very small
                     mask = np.abs(self.command_vel) < 0.01
                     self.command_vel[mask] = 0.0
+
+                # ── Automatic random push (in VELOCITY mode only) ──
+                if (self.fsm_state == FSMState.VELOCITY
+                        and AUTO_PUSH_INTERVAL_S > 0
+                        and self.push_steps_remaining == 0):
+                    if time.time() - self.last_auto_push_time > AUTO_PUSH_INTERVAL_S:
+                        self.trigger_push()
+                        self.last_auto_push_time = time.time()
 
                 # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
@@ -744,6 +784,14 @@ class AmpController:
                     for pi in range(NUM_JOINTS):
                         target_sdk[self.cfg.joint_ids_map[pi]] = target_policy[pi]
 
+                    # Apply push perturbation torques if active
+                    push_tau = np.zeros(NUM_JOINTS, dtype=np.float32)
+                    if self.push_steps_remaining > 0:
+                        push_tau = self.push_torques.copy()
+                        self.push_steps_remaining -= 1
+                        if self.push_steps_remaining == 0:
+                            print("[PUSH] Finished")
+
                     for i in range(NUM_JOINTS):
                         val = float(target_sdk[i])
                         if not np.isfinite(val):
@@ -754,7 +802,7 @@ class AmpController:
                         cmd.motor_cmd[i].kp = float(self.cfg.stiffness_sdk[i])
                         cmd.motor_cmd[i].dq = 0.0
                         cmd.motor_cmd[i].kd = float(self.cfg.damping_sdk[i])
-                        cmd.motor_cmd[i].tau = 0.0
+                        cmd.motor_cmd[i].tau = float(push_tau[i])
 
                 # ── Publish command ──
                 pub.Write(cmd)
@@ -844,7 +892,21 @@ Examples:
                         help="Path to policy.onnx")
     parser.add_argument("--deploy-yaml", type=str, default=None,
                         help="Path to deploy.yaml")
+    parser.add_argument("--push-interval", type=float, default=5.0,
+                        help="Auto-push interval in seconds (0=disabled, default=5.0)")
+    parser.add_argument("--push-force", type=float, default=40.0,
+                        help="Max push torque in Nm (default=40.0)")
+    parser.add_argument("--no-push", action="store_true",
+                        help="Disable automatic pushes (manual P key still works)")
     args = parser.parse_args()
+
+    # Apply perturbation settings
+    global AUTO_PUSH_INTERVAL_S, PUSH_TORQUE_RANGE
+    if args.no_push:
+        AUTO_PUSH_INTERVAL_S = 0.0
+    else:
+        AUTO_PUSH_INTERVAL_S = args.push_interval
+    PUSH_TORQUE_RANGE = (-args.push_force, args.push_force)
 
     # Resolve defaults
     default_policy, default_yaml = find_default_paths()
