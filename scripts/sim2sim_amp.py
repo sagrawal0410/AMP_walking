@@ -63,6 +63,15 @@ except ImportError as e:
     print(f"[WARNING] unitree_sdk2py import failed: {e}")
     UNITREE_SDK_AVAILABLE = False
 
+# CRC utility — required for real robot (firmware drops commands without valid CRC).
+# Not needed for unitree_mujoco (sim ignores CRC), but harmless to always compute.
+HAS_CRC = False
+try:
+    from unitree_sdk2py.utils.crc import CRC
+    HAS_CRC = True
+except ImportError:
+    pass
+
 try:
     from pynput import keyboard as pynput_keyboard
     from pynput.keyboard import Key
@@ -424,6 +433,9 @@ class AmpController:
         self.fsm_start_time = time.time()
         self.fixstand_start_pos = None
 
+        # ── CRC for real robot ──
+        self.crc_calculator = CRC() if HAS_CRC else None
+
         # ── Perturbation state ──
         self.push_steps_remaining = 0
         self.push_torques = np.zeros(NUM_JOINTS, dtype=np.float32)
@@ -584,6 +596,23 @@ class AmpController:
               f"pitch={pitch_component:+.1f} roll={roll_component:+.1f}")
 
     # ──────────────────────────────────────────────────────────────────────
+    # Command publish helper (handles CRC for real robot)
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _publish_cmd(self, pub, cmd):
+        """Finalize and publish a LowCmd message.
+
+        For the real G1 robot, this:
+          1. Sets mode_pr = 2 (developer mode — allows direct motor control)
+          2. Computes CRC-32 checksum (firmware drops commands without valid CRC)
+        For unitree_mujoco (sim), these fields are ignored but harmless.
+        """
+        cmd.mode_pr = 2  # Developer mode — required for real robot
+        if self.crc_calculator is not None:
+            cmd.crc = self.crc_calculator.Crc(cmd)
+        pub.Write(cmd)
+
+    # ──────────────────────────────────────────────────────────────────────
     # Main control loop
     # ──────────────────────────────────────────────────────────────────────
 
@@ -606,6 +635,10 @@ class AmpController:
         pub = ChannelPublisher("rt/lowcmd", HGLowCmd)
         pub.Init()
         print("[DDS] Publisher ready on rt/lowcmd")
+        if self.crc_calculator is not None:
+            print("[DDS] CRC enabled (required for real robot)")
+        else:
+            print("[DDS] CRC disabled (OK for sim, install unitree_sdk2py.utils.crc for real robot)")
 
         # ── Wait for first state ──
         print("[CTRL] Waiting for robot state...")
@@ -815,7 +848,7 @@ class AmpController:
                         cmd.motor_cmd[i].tau = float(push_tau[i])
 
                 # ── Publish command ──
-                pub.Write(cmd)
+                self._publish_cmd(pub, cmd)
 
                 # ── Diagnostics ──
                 step_count += 1
@@ -849,7 +882,7 @@ class AmpController:
                 cmd.motor_cmd[i].dq = 0.0
                 cmd.motor_cmd[i].kd = 3.0
                 cmd.motor_cmd[i].tau = 0.0
-            pub.Write(cmd)
+            self._publish_cmd(pub, cmd)
             print("[CTRL] Robot set to passive. Goodbye!")
 
         finally:
