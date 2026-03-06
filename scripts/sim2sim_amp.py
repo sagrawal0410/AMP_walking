@@ -119,6 +119,36 @@ class FSMState(Enum):
     VELOCITY = 3
 
 
+# ── FixStand PD gains (from config.yaml — different from policy gains!) ──
+# These are tuned for stable stand-up on the real robot.
+# Key differences from deploy.yaml stiffness/damping:
+#   - torso kp (indices 13-14): 200 vs 40
+#   - arm kd (indices 15-28): 10 vs 1  (10x more damping = no arm oscillation)
+FIXSTAND_KP = np.array([
+    100., 100., 100., 150., 40., 40.,    # left leg
+    100., 100., 100., 150., 40., 40.,    # right leg
+    200., 200., 200.,                     # torso (waist yaw, roll, pitch)
+    40., 40., 40., 40., 40., 40., 40.,   # left arm
+    40., 40., 40., 40., 40., 40., 40.,   # right arm
+], dtype=np.float32)
+
+FIXSTAND_KD = np.array([
+    2., 2., 2., 4., 2., 2.,    # left leg
+    2., 2., 2., 4., 2., 2.,    # right leg
+    5., 5., 5.,                 # torso
+    10., 10., 10., 10., 10., 10., 10.,  # left arm (10x higher than policy!)
+    10., 10., 10., 10., 10., 10., 10.,  # right arm
+], dtype=np.float32)
+
+PASSIVE_KD = np.array([
+    3., 3., 3., 3., 3., 3.,
+    3., 3., 3., 3., 3., 3.,
+    3., 3., 3.,
+    3., 3., 3., 3., 3., 3., 3.,
+    3., 3., 3., 3., 3., 3., 3.,
+], dtype=np.float32)
+
+
 # ── Perturbation config ──
 # Keyboard push: applies a brief torque pulse to hip joints to simulate external push
 PUSH_TORQUE_RANGE = (-40.0, 40.0)   # Nm range for random push (per joint)
@@ -793,15 +823,23 @@ class AmpController:
                 cmd.mode_machine = 5  # 29-DOF mode
 
                 if self.fsm_state == FSMState.PASSIVE:
+                    # CRITICAL: track current motor position (NOT q=0!)
+                    # C++ State_Passive::run() does:
+                    #   motor_cmd[i].q() = lowstate->motor_state[i].q();
+                    # Sending q=0 with any residual kp causes the robot to
+                    # try to slam all joints to zero → jittering / dangerous.
                     for i in range(NUM_JOINTS):
                         cmd.motor_cmd[i].mode = 1
-                        cmd.motor_cmd[i].q = 0.0
+                        cmd.motor_cmd[i].q = float(motor_pos[i])
                         cmd.motor_cmd[i].kp = 0.0
                         cmd.motor_cmd[i].dq = 0.0
-                        cmd.motor_cmd[i].kd = 3.0
+                        cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
                         cmd.motor_cmd[i].tau = 0.0
 
                 elif self.fsm_state == FSMState.FIXSTAND:
+                    # Use FixStand-specific PD gains (from config.yaml),
+                    # NOT the policy stiffness/damping from deploy.yaml!
+                    # Key difference: arm kd=10 (not 1) prevents arm oscillation.
                     elapsed = time.time() - self.fsm_start_time
                     ramp_time = 3.0
                     if self.fixstand_start_pos is None:
@@ -813,9 +851,9 @@ class AmpController:
                     for i in range(NUM_JOINTS):
                         cmd.motor_cmd[i].mode = 1
                         cmd.motor_cmd[i].q = float(target[i])
-                        cmd.motor_cmd[i].kp = float(self.cfg.stiffness_sdk[i])
+                        cmd.motor_cmd[i].kp = float(FIXSTAND_KP[i])
                         cmd.motor_cmd[i].dq = 0.0
-                        cmd.motor_cmd[i].kd = float(self.cfg.damping_sdk[i])
+                        cmd.motor_cmd[i].kd = float(FIXSTAND_KD[i])
                         cmd.motor_cmd[i].tau = 0.0
 
                 elif self.fsm_state == FSMState.VELOCITY:
@@ -872,15 +910,17 @@ class AmpController:
 
         except KeyboardInterrupt:
             print("\n[CTRL] Shutting down...")
-            # Send passive command
+            # Send passive command — track current position with zero kp
+            with self.state_lock:
+                shutdown_pos = self.motor_pos_sdk.copy()
             cmd = HGLowCmdDefault()
             cmd.mode_machine = 5
             for i in range(NUM_JOINTS):
                 cmd.motor_cmd[i].mode = 1
-                cmd.motor_cmd[i].q = 0.0
+                cmd.motor_cmd[i].q = float(shutdown_pos[i])
                 cmd.motor_cmd[i].kp = 0.0
                 cmd.motor_cmd[i].dq = 0.0
-                cmd.motor_cmd[i].kd = 3.0
+                cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
                 cmd.motor_cmd[i].tau = 0.0
             self._publish_cmd(pub, cmd)
             print("[CTRL] Robot set to passive. Goodbye!")
