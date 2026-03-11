@@ -1,37 +1,4 @@
 #!/usr/bin/env python3
-"""
-AMP Policy Controller for Unitree G1 29-DOF.
-
-Communicates via Unitree SDK2 DDS protocol — pairs with unitree_mujoco (sim2sim)
-or a real Unitree G1 robot (sim2real). Exact Python equivalent of the C++ g1_ctrl.
-
-Observation structure (per step = 117 dims, × 5 history = 585 total):
-  base_ang_vel              :  3
-  root_local_rot_tan_norm   :  6
-  velocity_commands         :  3
-  joint_pos                 : 29  (absolute, NOT relative)
-  joint_vel                 : 29
-  last_action               : 29
-  key_body_pos_b            : 18  (6 key bodies × 3 xyz)
-
-History stacking: use_gym_history=False → per-term concatenation
-  [term1_t0, term1_t1, ..., term1_t4, term2_t0, ..., term7_t4]
-
-Sim2Sim usage (pair with unitree_mujoco):
-  Terminal 1: cd unitree_mujoco/simulate_python && python unitree_mujoco.py
-  Terminal 2: python sim2sim_amp.py --network lo
-
-Sim2Real usage (connect to real G1):
-  python sim2sim_amp.py --network eth0
-
-Controls (keyboard):
-  ↑  : PASSIVE → FIXSTAND
-  →  : FIXSTAND → VELOCITY (activates policy)
-  ↓  : Any → PASSIVE
-  W/S/A/D/Q/E : velocity commands (only in VELOCITY mode)
-  Space : zero velocity
-  P     : apply random push perturbation
-"""
 
 import argparse
 import os
@@ -80,10 +47,6 @@ except ImportError:
     PYNPUT_AVAILABLE = False
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Constants
-# ──────────────────────────────────────────────────────────────────────────────
-
 NUM_JOINTS = 29
 HISTORY_LEN = 5
 OBS_PER_STEP = 3 + 6 + 3 + 29 + 29 + 29 + 18  # 117
@@ -118,12 +81,6 @@ class FSMState(Enum):
     FIXSTAND = 2
     VELOCITY = 3
 
-
-# ── FixStand PD gains (from config.yaml — different from policy gains!) ──
-# These are tuned for stable stand-up on the real robot.
-# Key differences from deploy.yaml stiffness/damping:
-#   - torso kp (indices 13-14): 200 vs 40
-#   - arm kd (indices 15-28): 10 vs 1  (10x more damping = no arm oscillation)
 FIXSTAND_KP = np.array([
     100., 100., 100., 150., 40., 40.,    # left leg
     100., 100., 100., 150., 40., 40.,    # right leg
@@ -149,8 +106,6 @@ PASSIVE_KD = np.array([
 ], dtype=np.float32)
 
 
-# ── Perturbation config ──
-# Keyboard push: applies a brief torque pulse to hip joints to simulate external push
 PUSH_TORQUE_RANGE = (-40.0, 40.0)   # Nm range for random push (per joint)
 PUSH_DURATION_STEPS = 10            # Number of control steps the push lasts (~200ms at 50Hz)
 PUSH_JOINTS_SDK = [0, 1, 6, 7]     # Hip pitch/roll joints (SDK indices) — best proxy for body push
@@ -158,17 +113,12 @@ PUSH_JOINTS_SDK = [0, 1, 6, 7]     # Hip pitch/roll joints (SDK indices) — bes
 AUTO_PUSH_INTERVAL_S = 5.0          # seconds between automatic pushes (0 = disabled)
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Math helpers (matching Isaac Lab conventions exactly)
-# ──────────────────────────────────────────────────────────────────────────────
 
 def quat_conjugate(q):
-    """Conjugate of quaternion (w, x, y, z)."""
     return np.array([q[0], -q[1], -q[2], -q[3]])
 
 
 def quat_mul(q1, q2):
-    """Hamilton product of two quaternions (w, x, y, z)."""
     w1, x1, y1, z1 = q1
     w2, x2, y2, z2 = q2
     return np.array([
@@ -180,7 +130,6 @@ def quat_mul(q1, q2):
 
 
 def quat_to_rotmat(q):
-    """Quaternion (w, x, y, z) → 3×3 rotation matrix."""
     w, x, y, z = q
     return np.array([
         [1 - 2*(y*y + z*z),     2*(x*y - w*z),     2*(x*z + w*y)],
@@ -190,26 +139,18 @@ def quat_to_rotmat(q):
 
 
 def yaw_quat(q):
-    """Extract yaw-only quaternion from (w, x, y, z)."""
     w, x, y, z = q
     yaw = np.arctan2(2.0 * (w * z + x * y), 1.0 - 2.0 * (y * y + z * z))
     return np.array([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)])
 
 
 def quat_rotate_inverse(q, v):
-    """Rotate vector v by the inverse of quaternion q (w, x, y, z)."""
     q_vec = q[1:4]
     a = v * (2.0 * q[0] ** 2 - 1.0)
     b = np.cross(q_vec, v) * q[0] * 2.0
     c = q_vec * np.dot(q_vec, v) * 2.0
     return a - b + c
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Forward Kinematics for key body positions
-# ──────────────────────────────────────────────────────────────────────────────
-# Since we communicate via DDS (no direct MuJoCo access), we compute
-# key body positions from joint angles using the kinematic chain from the XML.
 
 def _axis_angle_to_rotmat(axis, angle):
     c, s = np.cos(angle), np.sin(angle)
@@ -237,14 +178,8 @@ def _joint_transform(axis, angle):
 
 
 def compute_key_body_positions_g1(joint_pos_sdk):
-    """
-    Compute key body positions in pelvis (base) frame using forward kinematics.
-    Joint positions must be in SDK order (same as MuJoCo XML order).
-    Returns dict: body_name → position (3,) in base frame.
-    """
     q = joint_pos_sdk.astype(np.float64)
 
-    # ── Left leg chain: pelvis → left_ankle_roll_link ──
     T = np.eye(4)
     T = T @ _make_transform([0, 0.064452, -0.1027])
     T = T @ _joint_transform([0, 1, 0], q[0])   # left_hip_pitch
@@ -260,7 +195,6 @@ def compute_key_body_positions_g1(joint_pos_sdk):
     T = T @ _joint_transform([1, 0, 0], q[5])   # left_ankle_roll
     left_ankle_roll_pos = T[:3, 3].copy()
 
-    # ── Right leg chain: pelvis → right_ankle_roll_link ──
     T = np.eye(4)
     T = T @ _make_transform([0, -0.064452, -0.1027])
     T = T @ _joint_transform([0, 1, 0], q[6])   # right_hip_pitch
@@ -276,7 +210,6 @@ def compute_key_body_positions_g1(joint_pos_sdk):
     T = T @ _joint_transform([1, 0, 0], q[11])  # right_ankle_roll
     right_ankle_roll_pos = T[:3, 3].copy()
 
-    # ── Waist → torso chain ──
     T_waist = np.eye(4)
     T_waist = T_waist @ _joint_transform([0, 0, 1], q[12])  # waist_yaw
     T_waist = T_waist @ _make_transform([-0.0039635, 0, 0.035])
@@ -284,7 +217,6 @@ def compute_key_body_positions_g1(joint_pos_sdk):
     T_waist = T_waist @ _make_transform([0, 0, 0.019])
     T_waist = T_waist @ _joint_transform([0, 1, 0], q[14])  # waist_pitch
 
-    # ── Left arm chain: torso → left_shoulder_roll_link, left_wrist_yaw_link ──
     T = T_waist.copy()
     T = T @ _make_transform([0.0039563, 0.10022, 0.23778],
                              quat=[0.990264, 0.139201, 1.38722e-05, -9.86868e-05])
@@ -307,7 +239,6 @@ def compute_key_body_positions_g1(joint_pos_sdk):
     T = T @ _joint_transform([0, 0, 1], q[21])  # left_wrist_yaw
     left_wrist_yaw_pos = T[:3, 3].copy()
 
-    # ── Right arm chain: torso → right_shoulder_roll_link, right_wrist_yaw_link ──
     T = T_waist.copy()
     T = T @ _make_transform([0.0039563, -0.10021, 0.23778],
                              quat=[0.990264, -0.139201, 1.38722e-05, 9.86868e-05])
@@ -339,13 +270,7 @@ def compute_key_body_positions_g1(joint_pos_sdk):
         "right_shoulder_roll_link": right_shoulder_roll_pos,
     }
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Deploy config loader
-# ──────────────────────────────────────────────────────────────────────────────
-
 class DeployConfig:
-    """Parses deploy.yaml and provides all configuration needed for deployment."""
 
     def __init__(self, yaml_path: str):
         with open(yaml_path, "r") as f:
@@ -397,12 +322,7 @@ class DeployConfig:
         print(f"[CONFIG] use_gym_history={self.use_gym_history}")
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Observation history buffer
-# ──────────────────────────────────────────────────────────────────────────────
-
 class ObsTermBuffer:
-    """Per-term FIFO history buffer matching Isaac Lab's ObservationTermCfg."""
 
     def __init__(self, dim: int, history_length: int, scale: np.ndarray):
         self.dim = dim
@@ -428,11 +348,6 @@ class ObsTermBuffer:
         self.buffer.clear()
         self._initialized = False
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# AMP Policy Controller (DDS-based)
-# ──────────────────────────────────────────────────────────────────────────────
-
 class AmpController:
     """
     AMP policy controller for Unitree G1 via DDS protocol.
@@ -445,8 +360,6 @@ class AmpController:
 
     def __init__(self, policy_path: str, deploy_cfg: DeployConfig):
         self.cfg = deploy_cfg
-
-        # ── Load ONNX policy ──
         if ort is None:
             raise ImportError("onnxruntime required: pip install onnxruntime")
         self.session = ort.InferenceSession(policy_path)
@@ -456,30 +369,23 @@ class AmpController:
         print(f"[POLICY] Output: {out.name} shape={out.shape}")
         self.input_name = inp.name
 
-        # ── State variables ──
         self.raw_action = np.zeros(NUM_JOINTS, dtype=np.float32)
         self.command_vel = np.zeros(3, dtype=np.float32)
         self.fsm_state = FSMState.PASSIVE
         self.fsm_start_time = time.time()
         self.fixstand_start_pos = None
 
-        # ── CRC for real robot ──
         self.crc_calculator = CRC() if HAS_CRC else None
 
-        # ── Perturbation state ──
         self.push_steps_remaining = 0
         self.push_torques = np.zeros(NUM_JOINTS, dtype=np.float32)
         self.last_auto_push_time = time.time()
-
-        # ── Sensor data (updated by DDS callback) ──
         self.imu_quat_wxyz = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float64)
         self.imu_gyro = np.zeros(3, dtype=np.float32)
         self.motor_pos_sdk = np.zeros(NUM_JOINTS, dtype=np.float32)
         self.motor_vel_sdk = np.zeros(NUM_JOINTS, dtype=np.float32)
         self.state_lock = threading.Lock()
         self.state_received = False
-
-        # ── Observation term dims ──
         self.obs_term_dims = {
             "base_ang_vel": 3,
             "root_local_rot_tan_norm": 6,
@@ -490,8 +396,6 @@ class AmpController:
             "last_action": NUM_JOINTS,
             "key_body_pos_b": len(self.cfg.key_body_names) * 3,
         }
-
-        # ── Observation buffers ──
         self.obs_buffers: dict[str, ObsTermBuffer] = {}
         for term_name in self.cfg.obs_order:
             dim = self.obs_term_dims[term_name]
@@ -499,10 +403,6 @@ class AmpController:
             hl = tcfg.get("history_length", HISTORY_LEN)
             scale = tcfg.get("scale", np.ones(dim, dtype=np.float32))
             self.obs_buffers[term_name] = ObsTermBuffer(dim, hl, scale)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # DDS callback
-    # ──────────────────────────────────────────────────────────────────────
 
     def _lowstate_callback(self, msg):
         """Called by DDS subscriber when new LowState arrives."""
@@ -520,10 +420,6 @@ class AmpController:
             self.imu_gyro[1] = msg.imu_state.gyroscope[1]
             self.imu_gyro[2] = msg.imu_state.gyroscope[2]
             self.state_received = True
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Observation computation
-    # ──────────────────────────────────────────────────────────────────────
 
     def _compute_root_local_rot_tan_norm(self, imu_quat):
         """Yaw-removed rotation: columns 0 and 2 of rotation matrix."""
@@ -576,19 +472,11 @@ class AmpController:
         assert obs.shape == (TOTAL_OBS,), f"Obs shape {obs.shape}, expected ({TOTAL_OBS},)"
         return obs.astype(np.float32)
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Policy inference
-    # ──────────────────────────────────────────────────────────────────────
-
     def run_policy(self, obs):
         """Run ONNX policy inference. Returns raw action (29 dims, policy order)."""
         obs_input = obs.reshape(1, -1).astype(np.float32)
         result = self.session.run(None, {self.input_name: obs_input})
         return result[0][0, :NUM_JOINTS].astype(np.float32)
-
-    # ──────────────────────────────────────────────────────────────────────
-    # Safety checks
-    # ──────────────────────────────────────────────────────────────────────
 
     def check_orientation(self, imu_quat):
         """Check if robot orientation is within safe limits (60° from upright)."""
@@ -625,10 +513,6 @@ class AmpController:
         print(f"[PUSH] {dir_name} ({dir_deg:.0f}°) mag={magnitude:.1f}Nm "
               f"pitch={pitch_component:+.1f} roll={roll_component:+.1f}")
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Command publish helper (handles CRC for real robot)
-    # ──────────────────────────────────────────────────────────────────────
-
     def _publish_cmd(self, pub, cmd):
         """Finalize and publish a LowCmd message.
 
@@ -642,26 +526,19 @@ class AmpController:
             cmd.crc = self.crc_calculator.Crc(cmd)
         pub.Write(cmd)
 
-    # ──────────────────────────────────────────────────────────────────────
-    # Main control loop
-    # ──────────────────────────────────────────────────────────────────────
-
     def run(self, network: str = "lo", domain_id: int = 0):
         if not UNITREE_SDK_AVAILABLE:
             print("[ERROR] unitree_sdk2py not installed.")
             print("  Install: pip install unitree_sdk2py")
             sys.exit(1)
 
-        # ── Initialize DDS ──
         ChannelFactoryInitialize(domain_id, network)
         print(f"[DDS] Initialized: domain_id={domain_id}, network={network}")
 
-        # ── Subscribe to lowstate ──
         sub = ChannelSubscriber("rt/lowstate", HGLowState)
         sub.Init(self._lowstate_callback, 10)
         print("[DDS] Subscribed to rt/lowstate")
 
-        # ── Publisher for lowcmd ──
         pub = ChannelPublisher("rt/lowcmd", HGLowCmd)
         pub.Init()
         print("[DDS] Publisher ready on rt/lowcmd")
@@ -670,7 +547,6 @@ class AmpController:
         else:
             print("[DDS] CRC disabled (OK for sim, install unitree_sdk2py.utils.crc for real robot)")
 
-        # ── Wait for first state ──
         print("[CTRL] Waiting for robot state...")
         timeout = time.time() + 30.0
         while not self.state_received:
@@ -680,11 +556,9 @@ class AmpController:
             time.sleep(0.01)
         print("[CTRL] Robot state received!")
 
-        # ── Setup keyboard (hold-to-move with smooth decay) ──
         transition_request = [None]
         held_keys = set()  # track which movement keys are currently held
 
-        # ── Velocity targets when key is held ──
         KEY_VELOCITIES = {
             'w': np.array([ 1.0,  0.0,  0.0]),   # forward
             's': np.array([-1.0,  0.0,  0.0]),   # backward
@@ -740,7 +614,6 @@ class AmpController:
             print("[WARNING] pynput not installed — no keyboard control")
             print("  Install: pip install pynput")
 
-        # ── Print controls ──
         print("\n" + "=" * 60)
         print("  AMP Policy Controller — Unitree G1 29-DOF")
         print("=" * 60)
@@ -761,20 +634,17 @@ class AmpController:
         print(f"\n  Auto-push: {push_status}  |  Push force: ±{PUSH_TORQUE_RANGE[1]:.0f} Nm")
         print("=" * 60 + "\n")
 
-        # ── Control loop ──
         step_count = 0
         try:
             while True:
                 loop_start = time.time()
 
-                # ── Read latest sensor data ──
                 with self.state_lock:
                     motor_pos = self.motor_pos_sdk.copy()
                     motor_vel = self.motor_vel_sdk.copy()
                     imu_quat = self.imu_quat_wxyz.copy()
                     imu_gyro = self.imu_gyro.copy()
 
-                # ── Handle FSM transitions ──
                 if transition_request[0] is not None:
                     new_state = transition_request[0]
                     transition_request[0] = None
@@ -790,7 +660,6 @@ class AmpController:
                         self.raw_action[:] = 0.0
                     print(f"[FSM] {old_name} → {new_state.name}")
 
-                # ── Smooth velocity: exponential smoothing toward target ──
                 # Same approach as C++ controller: smoothly interpolate toward
                 # target (key-held) or zero (no key), using a single rate.
                 if self.fsm_state == FSMState.VELOCITY:
@@ -805,20 +674,16 @@ class AmpController:
                     mask = np.abs(self.command_vel) < 0.01
                     self.command_vel[mask] = 0.0
 
-                # ── Safety: orientation check in VELOCITY ──
                 if self.fsm_state == FSMState.VELOCITY:
                     if not self.check_orientation(imu_quat):
                         print("[SAFETY] Bad orientation! → PASSIVE")
                         self.fsm_state = FSMState.PASSIVE
 
-                # ── Compute observations ──
                 obs = self.compute_observations(motor_pos, motor_vel, imu_quat, imu_gyro)
 
-                # ── Run policy (only in VELOCITY) ──
                 if self.fsm_state == FSMState.VELOCITY:
                     self.raw_action = self.run_policy(obs)
 
-                # ── Build motor command ──
                 cmd = HGLowCmdDefault()
                 cmd.mode_machine = 5  # 29-DOF mode
 
@@ -885,10 +750,8 @@ class AmpController:
                         cmd.motor_cmd[i].kd = float(self.cfg.damping_sdk[i])
                         cmd.motor_cmd[i].tau = float(push_tau[i])
 
-                # ── Publish command ──
                 self._publish_cmd(pub, cmd)
 
-                # ── Diagnostics ──
                 step_count += 1
                 if step_count % 100 == 0:
                     R = quat_to_rotmat(imu_quat)
@@ -900,7 +763,6 @@ class AmpController:
                           f"action_max={np.max(np.abs(self.raw_action)):.3f}  "
                           f"jpos=[{motor_pos.min():.2f},{motor_pos.max():.2f}]")
 
-                # ── Maintain control rate ──
                 elapsed = time.time() - loop_start
                 sleep_time = self.cfg.step_dt - elapsed
                 if sleep_time > 0:
@@ -932,10 +794,6 @@ class AmpController:
                 except Exception:
                     pass
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CLI
-# ──────────────────────────────────────────────────────────────────────────────
 
 def find_default_paths():
     """Find default policy and deploy.yaml paths relative to this script."""
