@@ -466,6 +466,11 @@ class AmpController:
         # ── CRC for real robot ──
         self.crc_calculator = CRC() if HAS_CRC else None
 
+        # ── High-frequency command publisher state ──
+        self.cmd_lock = threading.Lock()
+        self.live_cmd = None          # Persistent command object (like C++ lowcmd)
+        self._publisher_running = False
+
         # ── Perturbation state ──
         self.push_steps_remaining = 0
         self.push_torques = np.zeros(NUM_JOINTS, dtype=np.float32)
@@ -643,6 +648,56 @@ class AmpController:
         pub.Write(cmd)
 
     # ──────────────────────────────────────────────────────────────────────
+    # High-frequency command publisher thread (mirrors C++ CtrlFSM @ 1000Hz)
+    # ──────────────────────────────────────────────────────────────────────
+
+    def _cmd_publisher_thread(self, pub):
+        """Background thread: re-publishes the current command at ~500Hz.
+
+        The C++ CtrlFSM loop (CtrlFSM.h dt=0.001) calls:
+          pre_run()  → reads lowstate
+          run()      → sets motor_cmd fields
+          post_run() → unlockAndPublish()
+        at 1000Hz. The real G1 motor controllers expect a continuous command
+        stream; without it, firmware enters a safety/timeout mode → jitter.
+
+        This thread re-publishes the persistent `live_cmd` at ~500Hz.
+        For PASSIVE, it also tracks current motor position at the fast rate.
+        For FIXSTAND, it updates the interpolation target at the fast rate.
+        For VELOCITY, it just re-publishes the latest policy output.
+        """
+        CMD_DT = 0.002  # 500Hz (C++ uses 1000Hz; 500Hz is sufficient)
+        while self._publisher_running:
+            with self.cmd_lock:
+                if self.live_cmd is not None:
+                    # High-rate updates (matching C++ State::run() at 1000Hz)
+                    if self.fsm_state == FSMState.PASSIVE:
+                        # C++ State_Passive::run() does:
+                        #   motor_cmd[i].q() = lowstate->motor_state[i].q();
+                        with self.state_lock:
+                            for i in range(NUM_JOINTS):
+                                self.live_cmd.motor_cmd[i].q = float(self.motor_pos_sdk[i])
+
+                    elif self.fsm_state == FSMState.FIXSTAND:
+                        # C++ State_FixStand::run() does:
+                        #   q = linear_interpolate(t, ts_, qs_);
+                        #   motor_cmd[i].q() = q[i];
+                        if self.fixstand_start_pos is not None:
+                            elapsed = time.time() - self.fsm_start_time
+                            alpha = min(elapsed / 3.0, 1.0)
+                            for i in range(NUM_JOINTS):
+                                t = (self.fixstand_start_pos[i] * (1 - alpha)
+                                     + self.cfg.default_joint_pos_sdk[i] * alpha)
+                                self.live_cmd.motor_cmd[i].q = float(t)
+
+                    # VELOCITY: q values set by main loop at 50Hz,
+                    # fast thread just re-publishes the same targets
+                    # (C++ State_RLBase::run() reads processed_actions() at 1000Hz)
+
+                    self._publish_cmd(pub, self.live_cmd)
+            time.sleep(CMD_DT)
+
+    # ──────────────────────────────────────────────────────────────────────
     # Main control loop
     # ──────────────────────────────────────────────────────────────────────
 
@@ -761,7 +816,35 @@ class AmpController:
         print(f"\n  Auto-push: {push_status}  |  Push force: ±{PUSH_TORQUE_RANGE[1]:.0f} Nm")
         print("=" * 60 + "\n")
 
-        # ── Control loop ──
+        # ──────────────────────────────────────────────────────────────
+        # Create persistent command object (C++ creates lowcmd ONCE)
+        # ──────────────────────────────────────────────────────────────
+        with self.cmd_lock:
+            self.live_cmd = HGLowCmdDefault()
+            self.live_cmd.mode_machine = 5  # 29-DOF mode (set once, like C++)
+
+            # Initialize in PASSIVE state (C++ State_Passive::enter())
+            with self.state_lock:
+                init_pos = self.motor_pos_sdk.copy()
+            for i in range(NUM_JOINTS):
+                self.live_cmd.motor_cmd[i].mode = 1
+                self.live_cmd.motor_cmd[i].q = float(init_pos[i])
+                self.live_cmd.motor_cmd[i].kp = 0.0
+                self.live_cmd.motor_cmd[i].dq = 0.0
+                self.live_cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
+                self.live_cmd.motor_cmd[i].tau = 0.0
+
+        # ──────────────────────────────────────────────────────────────
+        # Start high-frequency command publisher (C++ CtrlFSM @ 1000Hz)
+        # ──────────────────────────────────────────────────────────────
+        self._publisher_running = True
+        pub_thread = threading.Thread(
+            target=self._cmd_publisher_thread, args=(pub,), daemon=True
+        )
+        pub_thread.start()
+        print("[CTRL] Command publisher started (500Hz)")
+
+        # ── Control loop (50Hz — policy rate) ──
         step_count = 0
         try:
             while True:
@@ -775,33 +858,66 @@ class AmpController:
                     imu_gyro = self.imu_gyro.copy()
 
                 # ── Handle FSM transitions ──
+                # Mirrors C++ CtrlFSM::run_() which calls exit() then enter()
+                # on the new state, setting gains ONCE per transition.
                 if transition_request[0] is not None:
                     new_state = transition_request[0]
                     transition_request[0] = None
                     old_name = self.fsm_state.name
+
+                    # Set gains atomically under lock (like C++ State::enter())
+                    with self.cmd_lock:
+                        if new_state == FSMState.PASSIVE:
+                            # C++ State_Passive::enter(): kp=0, kd from config
+                            for i in range(NUM_JOINTS):
+                                self.live_cmd.motor_cmd[i].mode = 1
+                                self.live_cmd.motor_cmd[i].q = float(motor_pos[i])
+                                self.live_cmd.motor_cmd[i].kp = 0.0
+                                self.live_cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
+                                self.live_cmd.motor_cmd[i].dq = 0.0
+                                self.live_cmd.motor_cmd[i].tau = 0.0
+
+                        elif new_state == FSMState.FIXSTAND:
+                            # C++ State_FixStand::enter(): set kp/kd, record q0
+                            self.fixstand_start_pos = motor_pos.copy()
+                            for i in range(NUM_JOINTS):
+                                self.live_cmd.motor_cmd[i].mode = 1
+                                self.live_cmd.motor_cmd[i].q = float(motor_pos[i])
+                                self.live_cmd.motor_cmd[i].kp = float(FIXSTAND_KP[i])
+                                self.live_cmd.motor_cmd[i].kd = float(FIXSTAND_KD[i])
+                                self.live_cmd.motor_cmd[i].dq = 0.0
+                                self.live_cmd.motor_cmd[i].tau = 0.0
+
+                        elif new_state == FSMState.VELOCITY:
+                            # C++ State_RLBase::enter(): set policy stiffness/damping
+                            for i in range(NUM_JOINTS):
+                                self.live_cmd.motor_cmd[i].mode = 1
+                                self.live_cmd.motor_cmd[i].q = float(motor_pos[i])
+                                self.live_cmd.motor_cmd[i].kp = float(self.cfg.stiffness_sdk[i])
+                                self.live_cmd.motor_cmd[i].kd = float(self.cfg.damping_sdk[i])
+                                self.live_cmd.motor_cmd[i].dq = 0.0
+                                self.live_cmd.motor_cmd[i].tau = 0.0
+
+                    # Update FSM state AFTER gains are set
                     self.fsm_state = new_state
                     self.fsm_start_time = time.time()
-                    if new_state == FSMState.FIXSTAND:
-                        self.fixstand_start_pos = None
+
                     if new_state == FSMState.VELOCITY:
-                        # Reset obs buffers on entering velocity
                         for buf in self.obs_buffers.values():
                             buf.reset()
                         self.raw_action[:] = 0.0
+                        self.command_vel[:] = 0.0
+
                     print(f"[FSM] {old_name} → {new_state.name}")
 
                 # ── Smooth velocity: exponential smoothing toward target ──
-                # Same approach as C++ controller: smoothly interpolate toward
-                # target (key-held) or zero (no key), using a single rate.
                 if self.fsm_state == FSMState.VELOCITY:
                     target = np.zeros(3)
                     if held_keys:
                         for k in held_keys:
                             if k in KEY_VELOCITIES:
                                 target += KEY_VELOCITIES[k]
-                    # Smooth interpolation: same rate for attack AND decay
                     self.command_vel += (target - self.command_vel) * SMOOTHING
-                    # Deadzone: snap to zero when very small
                     mask = np.abs(self.command_vel) < 0.01
                     self.command_vel[mask] = 0.0
 
@@ -809,6 +925,12 @@ class AmpController:
                 if self.fsm_state == FSMState.VELOCITY:
                     if not self.check_orientation(imu_quat):
                         print("[SAFETY] Bad orientation! → PASSIVE")
+                        # Transition to PASSIVE with proper gain setting
+                        with self.cmd_lock:
+                            for i in range(NUM_JOINTS):
+                                self.live_cmd.motor_cmd[i].kp = 0.0
+                                self.live_cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
+                                self.live_cmd.motor_cmd[i].tau = 0.0
                         self.fsm_state = FSMState.PASSIVE
 
                 # ── Compute observations ──
@@ -818,49 +940,11 @@ class AmpController:
                 if self.fsm_state == FSMState.VELOCITY:
                     self.raw_action = self.run_policy(obs)
 
-                # ── Build motor command ──
-                cmd = HGLowCmdDefault()
-                cmd.mode_machine = 5  # 29-DOF mode
-
-                if self.fsm_state == FSMState.PASSIVE:
-                    # CRITICAL: track current motor position (NOT q=0!)
-                    # C++ State_Passive::run() does:
-                    #   motor_cmd[i].q() = lowstate->motor_state[i].q();
-                    # Sending q=0 with any residual kp causes the robot to
-                    # try to slam all joints to zero → jittering / dangerous.
-                    for i in range(NUM_JOINTS):
-                        cmd.motor_cmd[i].mode = 1
-                        cmd.motor_cmd[i].q = float(motor_pos[i])
-                        cmd.motor_cmd[i].kp = 0.0
-                        cmd.motor_cmd[i].dq = 0.0
-                        cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
-                        cmd.motor_cmd[i].tau = 0.0
-
-                elif self.fsm_state == FSMState.FIXSTAND:
-                    # Use FixStand-specific PD gains (from config.yaml),
-                    # NOT the policy stiffness/damping from deploy.yaml!
-                    # Key difference: arm kd=10 (not 1) prevents arm oscillation.
-                    elapsed = time.time() - self.fsm_start_time
-                    ramp_time = 3.0
-                    if self.fixstand_start_pos is None:
-                        self.fixstand_start_pos = motor_pos.copy()
-                    alpha = min(elapsed / ramp_time, 1.0)
-                    target = (self.fixstand_start_pos * (1 - alpha)
-                              + self.cfg.default_joint_pos_sdk * alpha)
-
-                    for i in range(NUM_JOINTS):
-                        cmd.motor_cmd[i].mode = 1
-                        cmd.motor_cmd[i].q = float(target[i])
-                        cmd.motor_cmd[i].kp = float(FIXSTAND_KP[i])
-                        cmd.motor_cmd[i].dq = 0.0
-                        cmd.motor_cmd[i].kd = float(FIXSTAND_KD[i])
-                        cmd.motor_cmd[i].tau = 0.0
-
-                elif self.fsm_state == FSMState.VELOCITY:
-                    # Policy action → target joint positions (policy order)
+                    # ── Update target positions from policy at 50Hz ──
+                    # C++ State_RLBase::run() reads processed_actions() at
+                    # 1000Hz; we set q here at 50Hz, fast thread re-publishes.
                     target_policy = (self.raw_action * self.cfg.action_scale
                                      + self.cfg.action_offset)
-                    # Convert to SDK order
                     target_sdk = np.zeros(NUM_JOINTS, dtype=np.float32)
                     for pi in range(NUM_JOINTS):
                         target_sdk[self.cfg.joint_ids_map[pi]] = target_policy[pi]
@@ -873,20 +957,19 @@ class AmpController:
                         if self.push_steps_remaining == 0:
                             print("[PUSH] Finished")
 
-                    for i in range(NUM_JOINTS):
-                        val = float(target_sdk[i])
-                        if not np.isfinite(val):
-                            val = float(motor_pos[i])
-                            print(f"[SAFETY] NaN/Inf action for joint {i}")
-                        cmd.motor_cmd[i].mode = 1
-                        cmd.motor_cmd[i].q = val
-                        cmd.motor_cmd[i].kp = float(self.cfg.stiffness_sdk[i])
-                        cmd.motor_cmd[i].dq = 0.0
-                        cmd.motor_cmd[i].kd = float(self.cfg.damping_sdk[i])
-                        cmd.motor_cmd[i].tau = float(push_tau[i])
+                    with self.cmd_lock:
+                        for i in range(NUM_JOINTS):
+                            val = float(target_sdk[i])
+                            if not np.isfinite(val):
+                                val = float(motor_pos[i])
+                                print(f"[SAFETY] NaN/Inf action for joint {i}")
+                            self.live_cmd.motor_cmd[i].q = val
+                            self.live_cmd.motor_cmd[i].tau = float(push_tau[i])
 
-                # ── Publish command ──
-                self._publish_cmd(pub, cmd)
+                # NOTE: No _publish_cmd() here!
+                # The background thread publishes at 500Hz.
+                # For PASSIVE and FIXSTAND, q values are updated in the
+                # fast thread (tracking motor_pos and interpolating).
 
                 # ── Diagnostics ──
                 step_count += 1
@@ -910,22 +993,25 @@ class AmpController:
 
         except KeyboardInterrupt:
             print("\n[CTRL] Shutting down...")
-            # Send passive command — track current position with zero kp
+            # Stop high-frequency publisher
+            self._publisher_running = False
+            time.sleep(0.01)  # Let publisher thread finish
+
+            # Send PASSIVE command — track current position with zero kp
             with self.state_lock:
                 shutdown_pos = self.motor_pos_sdk.copy()
-            cmd = HGLowCmdDefault()
-            cmd.mode_machine = 5
-            for i in range(NUM_JOINTS):
-                cmd.motor_cmd[i].mode = 1
-                cmd.motor_cmd[i].q = float(shutdown_pos[i])
-                cmd.motor_cmd[i].kp = 0.0
-                cmd.motor_cmd[i].dq = 0.0
-                cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
-                cmd.motor_cmd[i].tau = 0.0
-            self._publish_cmd(pub, cmd)
+            with self.cmd_lock:
+                for i in range(NUM_JOINTS):
+                    self.live_cmd.motor_cmd[i].q = float(shutdown_pos[i])
+                    self.live_cmd.motor_cmd[i].kp = 0.0
+                    self.live_cmd.motor_cmd[i].kd = float(PASSIVE_KD[i])
+                    self.live_cmd.motor_cmd[i].tau = 0.0
+                self._publish_cmd(pub, self.live_cmd)
+            self.fsm_state = FSMState.PASSIVE
             print("[CTRL] Robot set to passive. Goodbye!")
 
         finally:
+            self._publisher_running = False
             if PYNPUT_AVAILABLE:
                 try:
                     listener.stop()
