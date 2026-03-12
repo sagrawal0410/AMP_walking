@@ -1,21 +1,4 @@
 #!/usr/bin/env python3
-"""
-Sim2Real deployment of AMP walking policy on Unitree G1 29-DOF.
-
-This script uses the SAME DDS protocol as sim2sim_amp.py (since unitree_mujoco
-and the real G1 both communicate via the Unitree SDK2 DDS interface).
-
-The only difference from sim2sim is:
-  - Default network interface is eth0 (real robot Ethernet)
-  - Default domain_id is 0 (standard for real robot)
-  - Additional safety features (tighter orientation limits, etc.)
-
-Usage:
-  python sim2real_amp.py --policy /path/to/policy.onnx --deploy-yaml /path/to/deploy.yaml --network eth0
-
-Or equivalently, you can use sim2sim_amp.py directly:
-  python sim2sim_amp.py --policy /path/to/policy.onnx --deploy-yaml /path/to/deploy.yaml --network eth0
-"""
 
 import sys
 import os
@@ -26,20 +9,12 @@ from sim2sim_amp import AmpController, DeployConfig, main as sim2sim_main
 
 
 def main():
-    """
-    Entry point for sim2real. Delegates to sim2sim_amp.main() since the DDS
-    protocol is identical for unitree_mujoco and the real G1 robot.
-
-    Default network: eth0, default domain-id: 0
-    """
     # Override sys.argv defaults if not explicitly provided
     import argparse
     parser = argparse.ArgumentParser(
         description="Sim2Real AMP Policy Controller for Unitree G1 29-DOF.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-This is a convenience wrapper around sim2sim_amp.py with real-robot defaults.
-The DDS protocol is identical for unitree_mujoco (sim) and real G1 hardware.
 
 Usage:
   python sim2real_amp.py --network eth0
