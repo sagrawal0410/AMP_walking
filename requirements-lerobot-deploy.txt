@@ -6,6 +6,12 @@
 # Do NOT use `lerobot>=0.4.0` from PyPI — it will fail with
 # `ImportError: cannot import name 'require_package'`.
 #
+# The lerobot[unitree_g1] extra does NOT install the Unitree SDK, but
+# AmpG1Robot.__init__ requires `unitree_sdk2py` even for sim2sim. Install it
+# manually (not on PyPI), e.g.:
+#   git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
+#   pip install -e ./unitree_sdk2_python
+#
 # Install:
 #   pip install -r requirements-lerobot-deploy.txt
 #   pip install -e packages/lerobot_policy_amp_velocity -e packages/lerobot_robot_amp_g1
