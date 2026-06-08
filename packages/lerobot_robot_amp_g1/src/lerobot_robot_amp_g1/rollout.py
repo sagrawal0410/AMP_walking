@@ -24,7 +24,7 @@ from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.utils import init_logging
 from lerobot.utils.visualization_utils import init_rerun
 
-from .amp_g1 import AmpG1Robot
+from .amp_g1 import AmpG1  # noqa: F401  (ensures robot + config registration on import)
 
 logger = logging.getLogger(__name__)
 

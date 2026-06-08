@@ -7,7 +7,7 @@
 # `ImportError: cannot import name 'require_package'`.
 #
 # The lerobot[unitree_g1] extra does NOT install the Unitree SDK, but
-# AmpG1Robot.__init__ requires `unitree_sdk2py` even for sim2sim. Install it
+# AmpG1.__init__ requires `unitree_sdk2py` even for sim2sim. Install it
 # manually (not on PyPI), e.g.:
 #   git clone https://github.com/unitreerobotics/unitree_sdk2_python.git
 #   pip install -e ./unitree_sdk2_python

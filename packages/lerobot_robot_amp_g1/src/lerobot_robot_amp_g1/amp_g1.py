@@ -57,7 +57,7 @@ kTopicLowCommand = "rt/lowcmd"
 kTopicLowState = "rt/lowstate"
 
 
-class AmpG1Robot(Robot):
+class AmpG1(Robot):
     """Unitree G1 robot with AMP FSM, DDS I/O, and velocity command interface."""
 
     config_class = AmpG1Config
@@ -351,7 +351,7 @@ class AmpG1Robot(Robot):
         self._publisher_thread.start()
         self._start_keyboard_listener()
         self._connected = True
-        logger.info("AmpG1Robot connected (sim=%s, network=%s)", self.config.is_simulation, self.config.network)
+        logger.info("AmpG1 connected (sim=%s, network=%s)", self.config.is_simulation, self.config.network)
 
     def get_observation(self) -> RobotObservation:
         self._process_fsm_updates()
@@ -445,4 +445,4 @@ class AmpG1Robot(Robot):
             self._env_wrapper = None
 
         self._connected = False
-        logger.info("AmpG1Robot disconnected")
+        logger.info("AmpG1 disconnected")

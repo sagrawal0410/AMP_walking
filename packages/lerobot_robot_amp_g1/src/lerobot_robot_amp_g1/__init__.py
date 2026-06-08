@@ -7,10 +7,10 @@ except ImportError as exc:
         "lerobot is not installed. Install with: pip install 'lerobot[unitree_g1]'"
     ) from exc
 
-from .amp_g1 import AmpG1Robot
+from .amp_g1 import AmpG1
 from .config_amp_g1 import AmpG1Config
 
 __all__ = [
     "AmpG1Config",
-    "AmpG1Robot",
+    "AmpG1",
 ]
