@@ -14,7 +14,7 @@ from lerobot.cameras.realsense import RealSenseCameraConfig  # noqa: F401
 from lerobot.cameras.zmq import ZMQCameraConfig  # noqa: F401
 from lerobot.configs import parser
 from lerobot.robots import RobotConfig  # noqa: F401
-from lerobot.rollout import RolloutConfig, build_rollout_context, create_strategy
+from lerobot.rollout import RolloutConfig, build_rollout_context
 from lerobot.rollout.strategies.base import BaseStrategy
 from lerobot.rollout.strategies.core import send_next_action
 from lerobot.teleoperators import TeleoperatorConfig  # noqa: F401
@@ -85,7 +85,10 @@ def amp_rollout(cfg: RolloutConfig):
     shutdown_event = signal_handler.shutdown_event
 
     ctx = build_rollout_context(cfg, shutdown_event)
-    strategy = AmpLocomotionStrategy()
+    # RolloutStrategy.__init__ requires the strategy config (cfg.strategy, set via
+    # --strategy.type=base). We instantiate our subclass directly rather than via
+    # create_strategy() since it isn't in lerobot's built-in registry.
+    strategy = AmpLocomotionStrategy(cfg.strategy)
     logger.info("AMP rollout | robot=%s | fps=%.0f", cfg.robot.type, cfg.fps)
 
     try:
