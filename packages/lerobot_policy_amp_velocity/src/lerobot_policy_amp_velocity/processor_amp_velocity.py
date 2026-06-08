@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -16,6 +17,7 @@ from lerobot.processor import (
     PolicyActionProcessorStep,
     PolicyProcessorPipeline,
     ProcessorStepRegistry,
+    RenameObservationsProcessorStep,
     policy_action_to_transition,
     transition_to_policy_action,
 )
@@ -26,17 +28,37 @@ from .constants import G1_JOINT_NAMES, NUM_JOINTS, joint_dq_key, joint_q_key
 from .deploy_config import DeployConfig
 from .obs_builder import AmpObsBuilder
 
+# Pre- and post-processor steps must share a single AmpObsBuilder so that the
+# action written by the postprocessor (set_last_action) feeds the next observation
+# and the history buffers stay continuous. They are loaded independently from JSON
+# at deploy time, so we key a shared instance on the resolved deploy.yaml path.
+_OBS_BUILDER_CACHE: dict[str, AmpObsBuilder] = {}
+
+
+def get_shared_obs_builder(deploy_yaml: str) -> AmpObsBuilder:
+    key = str(Path(deploy_yaml).resolve())
+    builder = _OBS_BUILDER_CACHE.get(key)
+    if builder is None:
+        builder = AmpObsBuilder(DeployConfig(key))
+        _OBS_BUILDER_CACHE[key] = builder
+    return builder
+
 
 @ProcessorStepRegistry.register("amp_obs_builder")
 @dataclass
 class AmpObsBuilderProcessorStep(ObservationProcessorStep):
     """Build 585-dim observation.state from raw robot observations."""
 
-    deploy_cfg: DeployConfig
-    obs_builder: AmpObsBuilder = field(init=False)
+    deploy_yaml: str = ""
+    obs_builder: AmpObsBuilder = field(init=False, repr=False, compare=False)
 
     def __post_init__(self):
-        self.obs_builder = AmpObsBuilder(self.deploy_cfg)
+        if not self.deploy_yaml:
+            raise ValueError("amp_obs_builder step requires a 'deploy_yaml' path.")
+        self.obs_builder = get_shared_obs_builder(self.deploy_yaml)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"deploy_yaml": self.deploy_yaml}
 
     def observation(self, observation: dict) -> dict:
         motor_pos = np.zeros(NUM_JOINTS, dtype=np.float32)
@@ -88,8 +110,16 @@ class AmpObsBuilderProcessorStep(ObservationProcessorStep):
 class AmpActionPostprocessProcessorStep(PolicyActionProcessorStep):
     """Map raw policy actions to SDK-order joint position targets."""
 
-    deploy_cfg: DeployConfig
-    obs_builder: AmpObsBuilder
+    deploy_yaml: str = ""
+    obs_builder: AmpObsBuilder = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self):
+        if not self.deploy_yaml:
+            raise ValueError("amp_action_postprocess step requires a 'deploy_yaml' path.")
+        self.obs_builder = get_shared_obs_builder(self.deploy_yaml)
+
+    def get_config(self) -> dict[str, Any]:
+        return {"deploy_yaml": self.deploy_yaml}
 
     def action(self, action: PolicyAction) -> PolicyAction:
         if isinstance(action, torch.Tensor):
@@ -122,12 +152,16 @@ def make_amp_velocity_pre_post_processors(
     model_dir = config.pretrained_path
     if model_dir is None:
         raise ValueError("AMP velocity policy requires pretrained_path in config.")
-    deploy_cfg = DeployConfig(config.resolved_deploy_yaml(model_dir))
-    obs_builder = AmpObsBuilder(deploy_cfg)
+    # Store an absolute path so the steps resolve correctly when reloaded from JSON
+    # at deploy time (independent of the working directory).
+    deploy_yaml = str(config.resolved_deploy_yaml(model_dir).resolve())
 
     preprocessor = PolicyProcessorPipeline[dict[str, Any], dict[str, Any]](
         steps=[
-            AmpObsBuilderProcessorStep(deploy_cfg=deploy_cfg),
+            # lerobot's rollout always injects a `rename_observations_processor`
+            # override; the step must exist or loading raises KeyError.
+            RenameObservationsProcessorStep(),
+            AmpObsBuilderProcessorStep(deploy_yaml=deploy_yaml),
             AddBatchDimensionProcessorStep(),
             DeviceProcessorStep(device=config.device),
         ],
@@ -135,7 +169,7 @@ def make_amp_velocity_pre_post_processors(
     )
     postprocessor = PolicyProcessorPipeline[PolicyAction, PolicyAction](
         steps=[
-            AmpActionPostprocessProcessorStep(deploy_cfg=deploy_cfg, obs_builder=obs_builder),
+            AmpActionPostprocessProcessorStep(deploy_yaml=deploy_yaml),
             DeviceProcessorStep(device="cpu"),
         ],
         name=POLICY_POSTPROCESSOR_DEFAULT_NAME,

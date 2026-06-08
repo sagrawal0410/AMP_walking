@@ -55,6 +55,36 @@ def build_config_dict() -> dict:
     }
 
 
+def write_processor_configs(output_dir: Path) -> bool:
+    """Generate policy_preprocessor.json / policy_postprocessor.json via the real
+    lerobot pipeline. Returns False (with a warning) if lerobot/the plugin can't be
+    imported (e.g. when run from the Isaac Lab env instead of the deploy env)."""
+    try:
+        from lerobot.utils.constants import (
+            POLICY_POSTPROCESSOR_DEFAULT_NAME,
+            POLICY_PREPROCESSOR_DEFAULT_NAME,
+        )
+        from lerobot_policy_amp_velocity import AmpVelocityConfig
+        from lerobot_policy_amp_velocity.processor_amp_velocity import (
+            make_amp_velocity_pre_post_processors,
+        )
+    except Exception as exc:  # noqa: BLE001
+        print(
+            "[WARN] Could not import lerobot + lerobot_policy_amp_velocity "
+            f"({exc}).\n"
+            "       Skipping processor config generation. Re-run this script in the "
+            "lerobot deploy env to produce policy_preprocessor.json / "
+            "policy_postprocessor.json."
+        )
+        return False
+
+    config = AmpVelocityConfig.from_pretrained(output_dir)
+    pre, post = make_amp_velocity_pre_post_processors(config)
+    pre.save_pretrained(output_dir, config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json")
+    post.save_pretrained(output_dir, config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json")
+    return True
+
+
 def export_amp_policy(onnx_path: Path, deploy_yaml: Path, output_dir: Path) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -65,25 +95,11 @@ def export_amp_policy(onnx_path: Path, deploy_yaml: Path, output_dir: Path) -> P
     with open(output_dir / "config.json", "w") as f:
         json.dump(config, f, indent=2)
 
-    preprocessor_config = {
-        "name": "policy_preprocessor",
-        "steps": [
-            {"registry_name": "amp_obs_builder"},
-            {"registry_name": "add_batch_dimension"},
-            {"registry_name": "device_processor", "device": "cpu"},
-        ],
-    }
-    postprocessor_config = {
-        "name": "policy_postprocessor",
-        "steps": [
-            {"registry_name": "amp_action_postprocess"},
-            {"registry_name": "device_processor", "device": "cpu"},
-        ],
-    }
-    with open(output_dir / "preprocessor_config.json", "w") as f:
-        json.dump(preprocessor_config, f, indent=2)
-    with open(output_dir / "postprocessor_config.json", "w") as f:
-        json.dump(postprocessor_config, f, indent=2)
+    # Remove any stale, wrongly-named processor files from earlier exports.
+    for stale in ("preprocessor_config.json", "postprocessor_config.json"):
+        (output_dir / stale).unlink(missing_ok=True)
+
+    write_processor_configs(output_dir)
 
     readme = f"""---
 library_name: lerobot
@@ -107,7 +123,6 @@ Deploy with:
 amp-rollout \\
   --strategy.type=base \\
   --policy.path={output_dir} \\
-  --policy.type=amp_velocity \\
   --robot.type=amp_g1 \\
   --robot.is_simulation=true \\
   --fps=50
