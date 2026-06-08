@@ -1,6 +1,10 @@
-"""AMP-aware rollout entry point with FSM-gated policy inference."""
+"""AMP-aware rollout entry point with FSM-gated policy inference.
 
-from __future__ import annotations
+NOTE: do NOT add `from __future__ import annotations` here. lerobot's
+`parser.wrap()` reads the raw `cfg` annotation via inspect.getfullargspec; with
+PEP 563 stringized annotations it would pass the str "RolloutConfig" to
+draccus, which then fails with "must be called with a dataclass type".
+"""
 
 import logging
 import time
