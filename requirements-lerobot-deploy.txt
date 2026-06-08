@@ -1,0 +1,10 @@
+# LeRobot AMP deploy environment (Python 3.12)
+# Install: pip install -r requirements-lerobot-deploy.txt
+# Then:    pip install -e packages/lerobot_policy_amp_velocity -e packages/lerobot_robot_amp_g1
+
+lerobot[unitree_g1]>=0.4.0
+onnxruntime>=1.17.0
+numpy>=1.26.0
+pyyaml>=6.0
+pynput>=1.7.0
+torch>=2.2.0

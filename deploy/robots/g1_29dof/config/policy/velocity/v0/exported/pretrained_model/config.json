@@ -1,0 +1,32 @@
+{
+  "type": "amp_velocity",
+  "device": "cpu",
+  "deploy_yaml": "deploy.yaml",
+  "onnx_filename": "policy.onnx",
+  "horizon": 1,
+  "n_action_steps": 1,
+  "n_obs_steps": 1,
+  "history_length": 5,
+  "normalization_mapping": {
+    "VISUAL": "IDENTITY",
+    "STATE": "IDENTITY",
+    "ACTION": "IDENTITY"
+  },
+  "input_features": {
+    "observation.state": {
+      "type": "STATE",
+      "shape": [
+        585
+      ]
+    }
+  },
+  "output_features": {
+    "action": {
+      "type": "ACTION",
+      "shape": [
+        29
+      ]
+    }
+  },
+  "step_dt": 0.02
+}

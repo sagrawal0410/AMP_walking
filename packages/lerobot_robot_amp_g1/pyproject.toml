@@ -1,0 +1,22 @@
+[project]
+name = "lerobot_robot_amp_g1"
+version = "0.1.0"
+description = "LeRobot robot plugin for AMP velocity deploy on Unitree G1"
+requires-python = ">=3.12"
+dependencies = [
+    "lerobot>=0.4.0",
+    "lerobot_policy_amp_velocity>=0.1.0",
+    "numpy>=1.26.0",
+    "pynput>=1.7.0",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+amp-rollout = "lerobot_robot_amp_g1.rollout:main"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

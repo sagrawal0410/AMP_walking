@@ -1,0 +1,15 @@
+{
+  "name": "policy_preprocessor",
+  "steps": [
+    {
+      "registry_name": "amp_obs_builder"
+    },
+    {
+      "registry_name": "add_batch_dimension"
+    },
+    {
+      "registry_name": "device_processor",
+      "device": "cpu"
+    }
+  ]
+}

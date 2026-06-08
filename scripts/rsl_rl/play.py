@@ -34,6 +34,12 @@ parser.add_argument(
     help="Use the pre-trained checkpoint from Nucleus.",
 )
 parser.add_argument("--real-time", action="store_true", default=False, help="Run in real-time, if possible.")
+parser.add_argument(
+    "--export-lerobot",
+    action="store_true",
+    default=False,
+    help="Also export a LeRobot pretrained_model directory after ONNX export.",
+)
 # append RSL-RL cli arguments
 cli_args.add_rsl_rl_args(parser)
 # append AppLauncher cli args
@@ -177,6 +183,29 @@ def main(env_cfg: ManagerBasedRLEnvCfg | DirectRLEnvCfg | DirectMARLEnvCfg, agen
     export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
     export_policy_as_jit(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.pt")
     export_policy_as_onnx(policy_nn, normalizer=normalizer, path=export_model_dir, filename="policy.onnx")
+
+    if args_cli.export_lerobot:
+        import subprocess
+
+        deploy_yaml = os.path.join(log_dir, "params", "deploy.yaml")
+        lerobot_out = os.path.join(export_model_dir, "pretrained_model")
+        export_script = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "lerobot",
+            "export_amp_policy.py",
+        )
+        cmd = [
+            sys.executable,
+            export_script,
+            "--onnx",
+            os.path.join(export_model_dir, "policy.onnx"),
+            "--deploy-yaml",
+            deploy_yaml,
+            "--output",
+            lerobot_out,
+        ]
+        print(f"[INFO] Exporting LeRobot model: {' '.join(cmd)}")
+        subprocess.run(cmd, check=True)
 
     dt = env.unwrapped.step_dt
 

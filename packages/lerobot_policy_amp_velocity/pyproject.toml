@@ -1,0 +1,19 @@
+[project]
+name = "lerobot_policy_amp_velocity"
+version = "0.1.0"
+description = "LeRobot plugin for AMP velocity locomotion policies (585-dim obs, ONNX inference)"
+requires-python = ">=3.12"
+dependencies = [
+    "lerobot>=0.4.0",
+    "numpy>=1.26.0",
+    "onnxruntime>=1.17.0",
+    "pyyaml>=6.0",
+    "torch>=2.2.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
