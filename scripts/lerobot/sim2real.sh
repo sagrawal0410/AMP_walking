@@ -9,7 +9,6 @@ NETWORK="${NETWORK:-eth0}"
 amp-rollout \
   --strategy.type=base \
   --policy.path="$POLICY_PATH" \
-  --policy.type=amp_velocity \
   --robot.type=amp_g1 \
   --robot.is_simulation=false \
   --robot.network="$NETWORK" \
