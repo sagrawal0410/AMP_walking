@@ -84,6 +84,9 @@ def write_processor_configs(output_dir: Path) -> bool:
 
     # Use the BASE class so draccus consumes the "type" discriminator in config.json.
     config = PreTrainedConfig.from_pretrained(output_dir)
+    # from_pretrained does not populate pretrained_path; the processor factory needs it
+    # to resolve the deploy.yaml inside the model directory.
+    config.pretrained_path = output_dir
     pre, post = make_amp_velocity_pre_post_processors(config)
     pre.save_pretrained(output_dir, config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json")
     post.save_pretrained(output_dir, config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json")
