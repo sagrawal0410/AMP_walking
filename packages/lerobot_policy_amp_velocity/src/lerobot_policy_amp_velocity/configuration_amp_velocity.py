@@ -19,6 +19,7 @@ class AmpVelocityPolicyConfig(PreTrainedConfig):
     device: str = "cpu"
     deploy_yaml: str = "deploy.yaml"
     onnx_filename: str = "policy.onnx"
+    step_dt: float = 0.02
 
     horizon: int = 1
     n_action_steps: int = 1
