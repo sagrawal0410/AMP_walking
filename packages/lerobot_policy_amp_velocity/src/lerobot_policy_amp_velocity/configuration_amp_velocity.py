@@ -13,7 +13,7 @@ from .constants import G1_JOINT_NAMES, NUM_JOINTS, TOTAL_OBS, joint_q_key
 
 @PreTrainedConfig.register_subclass("amp_velocity")
 @dataclass
-class AmpVelocityPolicyConfig(PreTrainedConfig):
+class AmpVelocityConfig(PreTrainedConfig):
     """AMP velocity policy: 585-dim proprioceptive obs, 29-dim joint actions."""
 
     device: str = "cpu"

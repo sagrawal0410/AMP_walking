@@ -21,7 +21,7 @@ from lerobot.processor import (
 )
 from lerobot.utils.constants import ACTION, OBS_STATE, POLICY_POSTPROCESSOR_DEFAULT_NAME, POLICY_PREPROCESSOR_DEFAULT_NAME
 
-from .configuration_amp_velocity import AmpVelocityPolicyConfig
+from .configuration_amp_velocity import AmpVelocityConfig
 from .constants import G1_JOINT_NAMES, NUM_JOINTS, joint_dq_key, joint_q_key
 from .deploy_config import DeployConfig
 from .obs_builder import AmpObsBuilder
@@ -113,7 +113,7 @@ class AmpActionPostprocessProcessorStep(PolicyActionProcessorStep):
 
 
 def make_amp_velocity_pre_post_processors(
-    config: AmpVelocityPolicyConfig,
+    config: AmpVelocityConfig,
     dataset_stats: dict[str, dict[str, torch.Tensor]] | None = None,
 ) -> tuple[
     PolicyProcessorPipeline[dict[str, Any], dict[str, Any]],

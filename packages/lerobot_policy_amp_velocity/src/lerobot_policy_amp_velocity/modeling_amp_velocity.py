@@ -16,7 +16,7 @@ from lerobot.configs import PreTrainedConfig
 from lerobot.policies.pretrained import PreTrainedPolicy
 from lerobot.utils.constants import ACTION, OBS_STATE
 
-from .configuration_amp_velocity import AmpVelocityPolicyConfig
+from .configuration_amp_velocity import AmpVelocityConfig
 from .constants import NUM_JOINTS
 from .deploy_config import DeployConfig
 from .obs_builder import AmpObsBuilder
@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 class AmpVelocityPolicy(PreTrainedPolicy):
-    config_class = AmpVelocityPolicyConfig
+    config_class = AmpVelocityConfig
     name = "amp_velocity"
 
-    def __init__(self, config: AmpVelocityPolicyConfig, deploy_cfg: DeployConfig | None = None):
+    def __init__(self, config: AmpVelocityConfig, deploy_cfg: DeployConfig | None = None):
         super().__init__(config)
-        self.config: AmpVelocityPolicyConfig = config
+        self.config: AmpVelocityConfig = config
         config.validate_features()
 
         self.deploy_cfg = deploy_cfg
@@ -66,10 +66,10 @@ class AmpVelocityPolicy(PreTrainedPolicy):
             raise FileNotFoundError(f"AMP policy directory not found: {model_dir}")
 
         if config is None:
-            config = AmpVelocityPolicyConfig.from_pretrained(model_dir)
+            config = AmpVelocityConfig.from_pretrained(model_dir)
 
-        if not isinstance(config, AmpVelocityPolicyConfig):
-            raise TypeError(f"Expected AmpVelocityPolicyConfig, got {type(config)}")
+        if not isinstance(config, AmpVelocityConfig):
+            raise TypeError(f"Expected AmpVelocityConfig, got {type(config)}")
 
         deploy_yaml = config.resolved_deploy_yaml(model_dir)
         onnx_path = config.resolved_onnx_path(model_dir)

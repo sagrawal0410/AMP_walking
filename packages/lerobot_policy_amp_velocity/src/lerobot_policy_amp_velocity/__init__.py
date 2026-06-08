@@ -7,12 +7,12 @@ except ImportError as exc:
         "lerobot is not installed. Install with: pip install 'lerobot[unitree_g1]'"
     ) from exc
 
-from .configuration_amp_velocity import AmpVelocityPolicyConfig
+from .configuration_amp_velocity import AmpVelocityConfig
 from .modeling_amp_velocity import AmpVelocityPolicy
 from .processor_amp_velocity import make_amp_velocity_pre_post_processors
 
 __all__ = [
-    "AmpVelocityPolicyConfig",
+    "AmpVelocityConfig",
     "AmpVelocityPolicy",
     "make_amp_velocity_pre_post_processors",
 ]
