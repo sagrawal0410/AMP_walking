@@ -60,11 +60,15 @@ def write_processor_configs(output_dir: Path) -> bool:
     lerobot pipeline. Returns False (with a warning) if lerobot/the plugin can't be
     imported (e.g. when run from the Isaac Lab env instead of the deploy env)."""
     try:
+        from lerobot.configs import PreTrainedConfig
         from lerobot.utils.constants import (
             POLICY_POSTPROCESSOR_DEFAULT_NAME,
             POLICY_PREPROCESSOR_DEFAULT_NAME,
         )
-        from lerobot_policy_amp_velocity import AmpVelocityConfig
+
+        # Importing the plugin registers the "amp_velocity" config subclass so that
+        # PreTrainedConfig.from_pretrained can dispatch on the JSON "type" field.
+        import lerobot_policy_amp_velocity  # noqa: F401
         from lerobot_policy_amp_velocity.processor_amp_velocity import (
             make_amp_velocity_pre_post_processors,
         )
@@ -78,7 +82,8 @@ def write_processor_configs(output_dir: Path) -> bool:
         )
         return False
 
-    config = AmpVelocityConfig.from_pretrained(output_dir)
+    # Use the BASE class so draccus consumes the "type" discriminator in config.json.
+    config = PreTrainedConfig.from_pretrained(output_dir)
     pre, post = make_amp_velocity_pre_post_processors(config)
     pre.save_pretrained(output_dir, config_filename=f"{POLICY_PREPROCESSOR_DEFAULT_NAME}.json")
     post.save_pretrained(output_dir, config_filename=f"{POLICY_POSTPROCESSOR_DEFAULT_NAME}.json")
