@@ -13,7 +13,7 @@ from lerobot.types import RobotAction, RobotObservation
 from lerobot.utils.import_utils import _unitree_sdk_available, require_package
 
 from lerobot_policy_amp_velocity.amp_kinematics import check_orientation_safe
-from lerobot_policy_amp_velocity.constants import G1_JOINT_NAMES, NUM_JOINTS, joint_dq_key, joint_q_key
+from lerobot_policy_amp_velocity.constants import G1_JOINT_NAMES, NUM_JOINTS, joint_q_key, raw_obs_keys
 from lerobot_policy_amp_velocity.deploy_config import DeployConfig
 
 from .config_amp_g1 import AmpG1Config
@@ -121,16 +121,11 @@ class AmpG1(Robot):
 
     @cached_property
     def observation_features(self) -> dict[str, type | tuple]:
-        features: dict[str, type | tuple] = {}
-        for name in G1_JOINT_NAMES:
-            features[joint_q_key(name)] = float
-            features[joint_dq_key(name)] = float
-        for key in ("imu.gyro.x", "imu.gyro.y", "imu.gyro.z"):
-            features[key] = float
-        for key in ("imu.quat.w", "imu.quat.x", "imu.quat.y", "imu.quat.z"):
-            features[key] = float
-        for i in range(3):
-            features[f"velocity_commands.{i}"] = float
+        # The .pos-suffixed raw keys are concatenated by lerobot into
+        # `observation.state` (consumed by AmpObsBuilderProcessorStep). fsm_state
+        # and policy_enabled deliberately lack the .pos suffix so they are kept
+        # out of the policy tensor (diagnostics only).
+        features: dict[str, type | tuple] = {key: float for key in raw_obs_keys()}
         features["fsm_state"] = float
         features["policy_enabled"] = float
         return features
@@ -361,19 +356,16 @@ class AmpG1(Robot):
             imu_quat = self.imu_quat_wxyz.copy()
             imu_gyro = self.imu_gyro.copy()
 
-        obs: RobotObservation = {}
-        for idx, name in enumerate(G1_JOINT_NAMES):
-            obs[joint_q_key(name)] = float(pos[idx])
-            obs[joint_dq_key(name)] = float(vel[idx])
-        obs["imu.gyro.x"] = float(imu_gyro[0])
-        obs["imu.gyro.y"] = float(imu_gyro[1])
-        obs["imu.gyro.z"] = float(imu_gyro[2])
-        obs["imu.quat.w"] = float(imu_quat[0])
-        obs["imu.quat.x"] = float(imu_quat[1])
-        obs["imu.quat.y"] = float(imu_quat[2])
-        obs["imu.quat.z"] = float(imu_quat[3])
-        for i in range(3):
-            obs[f"velocity_commands.{i}"] = float(self.command_vel[i])
+        # Order MUST match constants.raw_obs_keys() so the concatenated
+        # observation.state vector slices correctly in AmpObsBuilderProcessorStep.
+        raw_vals = (
+            [float(pos[idx]) for idx in range(NUM_JOINTS)]
+            + [float(vel[idx]) for idx in range(NUM_JOINTS)]
+            + [float(imu_quat[0]), float(imu_quat[1]), float(imu_quat[2]), float(imu_quat[3])]
+            + [float(imu_gyro[0]), float(imu_gyro[1]), float(imu_gyro[2])]
+            + [float(self.command_vel[0]), float(self.command_vel[1]), float(self.command_vel[2])]
+        )
+        obs: RobotObservation = dict(zip(raw_obs_keys(), raw_vals))
         obs["fsm_state"] = float(self.fsm_state.value)
         obs["policy_enabled"] = float(self.fsm_state == FSMState.VELOCITY)
         return obs

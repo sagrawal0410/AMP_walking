@@ -24,7 +24,7 @@ from lerobot.processor import (
 from lerobot.utils.constants import ACTION, OBS_STATE, POLICY_POSTPROCESSOR_DEFAULT_NAME, POLICY_PREPROCESSOR_DEFAULT_NAME
 
 from .configuration_amp_velocity import AmpVelocityConfig
-from .constants import G1_JOINT_NAMES, NUM_JOINTS, joint_dq_key, joint_q_key
+from .constants import RAW_OBS_DIM, G1_JOINT_NAMES, NUM_JOINTS, joint_q_key
 from .deploy_config import DeployConfig
 from .obs_builder import AmpObsBuilder
 
@@ -61,37 +61,34 @@ class AmpObsBuilderProcessorStep(ObservationProcessorStep):
         return {"deploy_yaml": self.deploy_yaml}
 
     def observation(self, observation: dict) -> dict:
-        motor_pos = np.zeros(NUM_JOINTS, dtype=np.float32)
-        motor_vel = np.zeros(NUM_JOINTS, dtype=np.float32)
-        for idx, name in enumerate(G1_JOINT_NAMES):
-            motor_pos[idx] = float(observation.get(joint_q_key(name), 0.0))
-            motor_vel[idx] = float(observation.get(joint_dq_key(name), 0.0))
+        # lerobot concatenates the robot's raw .pos features into a single
+        # `observation.state` vector (see constants.raw_obs_keys for the layout)
+        # and runs this step on it inside the inference engine. We slice the
+        # vector back into the components AmpObsBuilder expects, then replace
+        # observation.state with the full 585-dim AMP observation.
+        state = observation.get(OBS_STATE)
+        if state is None:
+            raise ValueError(
+                "amp_obs_builder expected 'observation.state' in the frame. The robot must expose "
+                "the raw .pos features from constants.raw_obs_keys()."
+            )
+        if isinstance(state, torch.Tensor):
+            arr = state.detach().cpu().numpy()
+        else:
+            arr = np.asarray(state)
+        arr = arr.reshape(-1).astype(np.float32)
+        if arr.shape[0] != RAW_OBS_DIM:
+            raise ValueError(
+                f"observation.state has dim {arr.shape[0]}, expected raw dim {RAW_OBS_DIM}. "
+                "Check that the robot's observation_features match constants.raw_obs_keys()."
+            )
 
-        imu_quat = np.array(
-            [
-                float(observation.get("imu.quat.w", 1.0)),
-                float(observation.get("imu.quat.x", 0.0)),
-                float(observation.get("imu.quat.y", 0.0)),
-                float(observation.get("imu.quat.z", 0.0)),
-            ],
-            dtype=np.float64,
-        )
-        imu_gyro = np.array(
-            [
-                float(observation.get("imu.gyro.x", 0.0)),
-                float(observation.get("imu.gyro.y", 0.0)),
-                float(observation.get("imu.gyro.z", 0.0)),
-            ],
-            dtype=np.float32,
-        )
-        command_vel = np.array(
-            [
-                float(observation.get("velocity_commands.0", 0.0)),
-                float(observation.get("velocity_commands.1", 0.0)),
-                float(observation.get("velocity_commands.2", 0.0)),
-            ],
-            dtype=np.float32,
-        )
+        motor_pos = arr[0:NUM_JOINTS]
+        motor_vel = arr[NUM_JOINTS : 2 * NUM_JOINTS]
+        base = 2 * NUM_JOINTS
+        imu_quat = arr[base : base + 4].astype(np.float64)
+        imu_gyro = arr[base + 4 : base + 7]
+        command_vel = arr[base + 7 : base + 10]
 
         obs_vec = self.obs_builder.compute(motor_pos, motor_vel, imu_quat, imu_gyro, command_vel)
         out = dict(observation)

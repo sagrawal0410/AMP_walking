@@ -80,8 +80,35 @@ G1_JOINT_NAMES = [
     "kRightWristYaw",
 ]
 
+# lerobot's rollout pipeline only routes float observation/action features whose
+# key ends in ".pos" into the policy-facing `observation.state` / `action`
+# tensors (see lerobot.rollout.context.build_rollout_context). Every key we want
+# the framework to forward must therefore end in ".pos".
 def joint_q_key(name: str) -> str:
-    return f"{name}.q"
+    """Joint position key (also the action target key)."""
+    return f"{name}.pos"
+
 
 def joint_dq_key(name: str) -> str:
-    return f"{name}.dq"
+    """Joint velocity key. The ".pos" suffix is required so lerobot forwards it
+    into `observation.state`; it does not imply a position channel."""
+    return f"{name}.vel.pos"
+
+
+# Raw, per-step quantities the AmpObsBuilder needs, in the exact order they are
+# concatenated into `observation.state` by lerobot's `build_dataset_frame`. The
+# robot declares features in this order and AmpObsBuilderProcessorStep slices the
+# resulting vector with the same layout.
+_IMU_QUAT_KEYS = ["imu.quat.w.pos", "imu.quat.x.pos", "imu.quat.y.pos", "imu.quat.z.pos"]
+_IMU_GYRO_KEYS = ["imu.gyro.x.pos", "imu.gyro.y.pos", "imu.gyro.z.pos"]
+_CMD_KEYS = ["velocity_commands.0.pos", "velocity_commands.1.pos", "velocity_commands.2.pos"]
+
+RAW_OBS_DIM = 2 * NUM_JOINTS + len(_IMU_QUAT_KEYS) + len(_IMU_GYRO_KEYS) + len(_CMD_KEYS)  # 68
+
+
+def raw_obs_keys() -> list[str]:
+    """Ordered raw observation feature keys backing `observation.state` (len 68)."""
+    keys = [joint_q_key(name) for name in G1_JOINT_NAMES]
+    keys += [joint_dq_key(name) for name in G1_JOINT_NAMES]
+    keys += _IMU_QUAT_KEYS + _IMU_GYRO_KEYS + _CMD_KEYS
+    return keys
