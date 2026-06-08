@@ -8,7 +8,6 @@ DEPLOY_YAML="${DEPLOY_YAML:-$ROOT/deploy/robots/g1_29dof/config/policy/velocity/
 amp-rollout \
   --strategy.type=base \
   --policy.path="$POLICY_PATH" \
-  --policy.type=amp_velocity \
   --robot.type=amp_g1 \
   --robot.is_simulation=true \
   --robot.network=lo \
